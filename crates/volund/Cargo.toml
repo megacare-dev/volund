@@ -1,0 +1,15 @@
+[package]
+name = "volund"
+description = "PLE agent harness: WebSocket server driving one model through each task"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+volund-world.workspace = true
+volund-fsm.workspace = true
+volund-proto.workspace = true
+
+[lints]
+workspace = true

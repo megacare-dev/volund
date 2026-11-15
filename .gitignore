@@ -1,0 +1,6 @@
+/target
+# keys and local proxy settings stay outside the entry (kit README: --env-file)
+*.env
+# eval/run.py output; artifacts/ itself IS committed
+/runs/
+.DS_Store

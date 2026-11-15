@@ -1,0 +1,5 @@
+# Pinned: the build container installs exactly this version (DESIGN.md §7). Change it on purpose, never by update.
+[toolchain]
+channel = "1.98.1"
+components = ["rustfmt", "clippy"]
+profile = "minimal"
