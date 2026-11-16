@@ -1,0 +1,25 @@
+{
+  "scripts": [
+    {
+      "when": "Reply with the word OK",
+      "turns": [{"text": "OK"}]
+    },
+    {
+      "when": "hello.txt",
+      "turns": [
+        {"calls": [{"name": "write_file", "arguments": {"path": "hello.txt", "content": "HELLO\n"}}]},
+        {"calls": [{"name": "bash", "arguments": {"command": "cat hello.txt"}}]},
+        {"text": "done"}
+      ]
+    },
+    {
+      "when": "design memo",
+      "repeat_last": true,
+      "turns": [
+        {"calls": [{"name": "write_file", "arguments": {"path": "memo.md", "content": "# Draft\n"}}]},
+        {"calls": [{"name": "bash", "arguments": {"command": "sleep 20; wc -c memo.md"}}]}
+      ]
+    }
+  ],
+  "default": [{"text": "OK"}]
+}

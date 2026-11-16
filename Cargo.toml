@@ -11,12 +11,25 @@ rust-version = "1.98"
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+base64 = { version = "0.23", default-features = false, features = ["std"] }
+tokio = { version = "1.54", features = ["rt-multi-thread", "macros", "net", "time", "sync", "io-util"] }
+tokio-tungstenite = "0.30"
+futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
+# TLS through rustls with ring: builds with a C compiler alone (the build image has no cmake), and the root
+# certificates come from the system store of the serve image.
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "system-proxy"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 volund-world = { path = "crates/volund-world" }
 volund-fsm = { path = "crates/volund-fsm" }
 volund-proto = { path = "crates/volund-proto" }
+volund-llm = { path = "crates/volund-llm" }
+volund-mock = { path = "crates/volund-mock" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
+
+[profile.release]
+codegen-units = 4

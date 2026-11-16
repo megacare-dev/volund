@@ -1,0 +1,15 @@
+[package]
+name = "volund-mock"
+description = "Scripted stand-in for an OpenAI-compatible model, for tests and for kit check without a paid model"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+serde_json.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

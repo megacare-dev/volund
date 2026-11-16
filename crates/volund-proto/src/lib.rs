@@ -163,6 +163,85 @@ impl Outgoing {
     pub fn to_frame(&self) -> serde_json::Result<String> {
         serde_json::to_string(self)
     }
+
+    /// The request id, for requests.
+    pub fn id(&self) -> Option<&str> {
+        match self {
+            Self::Exec { id, .. }
+            | Self::ReadFile { id, .. }
+            | Self::WriteFile { id, .. }
+            | Self::Http { id, .. } => Some(id),
+            _ => None,
+        }
+    }
+
+    /// Checks the rules whose breach makes the evaluator count a frame as malformed (protocol.md §2,
+    /// "Errors and malformed frames"); twenty of those end the task. A frame that fails here must not
+    /// be sent. Whether an `http` URL belongs to one of the task's MCP servers is checked by the
+    /// caller, which knows the servers.
+    pub fn check(&self) -> Result<(), String> {
+        if let Some(id) = self.id() {
+            if id.is_empty() {
+                return Err("the request id is empty".into());
+            }
+            if id.chars().count() > MAX_ID_CHARS {
+                return Err(format!(
+                    "the request id is longer than {MAX_ID_CHARS} characters"
+                ));
+            }
+        }
+        match self {
+            Self::Exec { command, .. } => required_text("command", command),
+            Self::ReadFile { path, .. } => required_text("path", path),
+            Self::WriteFile {
+                path, content_b64, ..
+            } => {
+                required_text("path", path)?;
+                let size = decoded_len(content_b64);
+                if size > MAX_FILE_BYTES {
+                    return Err(format!(
+                        "the write holds {size} bytes, more than the {MAX_FILE_BYTES} one write may carry"
+                    ));
+                }
+                Ok(())
+            }
+            Self::Http { url, .. } => required_text("url", url),
+            Self::Usage {
+                input_tokens,
+                output_tokens,
+                cache_read_tokens,
+                ..
+            } => {
+                if [input_tokens, output_tokens, cache_read_tokens]
+                    .iter()
+                    .any(|&&n| n > MAX_SAFE_INTEGER)
+                {
+                    return Err("a token count is larger than 2^53 - 1".into());
+                }
+                Ok(())
+            }
+            Self::Log { .. } | Self::Done { .. } | Self::Error { .. } => Ok(()),
+        }
+    }
+}
+
+/// Largest token count a `usage` frame may carry (2^53 - 1).
+pub const MAX_SAFE_INTEGER: u64 = (1 << 53) - 1;
+
+fn required_text(name: &str, value: &str) -> Result<(), String> {
+    if value.is_empty() {
+        return Err(format!("{name} is empty"));
+    }
+    if value.contains('\0') {
+        return Err(format!("{name} holds a NUL byte"));
+    }
+    Ok(())
+}
+
+/// Bytes that standard Base64 text decodes to, from its length and padding.
+fn decoded_len(b64: &str) -> usize {
+    let padding = b64.bytes().rev().take_while(|&b| b == b'=').count().min(2);
+    (b64.len() / 4 * 3 + [0, 0, 1, 2][b64.len() % 4]).saturating_sub(padding)
 }
 
 #[cfg(test)]
@@ -266,6 +345,56 @@ mod tests {
             frame,
             json!({"type": "write_file", "id": "3", "path": "/app/out/report.md", "content_b64": ""})
         );
+    }
+
+    #[test]
+    fn frames_the_evaluator_would_count_as_malformed_are_refused() {
+        let exec = |command: &str| Outgoing::Exec {
+            id: "1".into(),
+            command: command.into(),
+            timeout_sec: None,
+        };
+        assert!(exec("ls").check().is_ok());
+        assert!(exec("").check().is_err(), "empty command");
+        assert!(exec("ls\0-la").check().is_err(), "NUL in command");
+
+        let read = |id: &str, path: &str| Outgoing::ReadFile {
+            id: id.into(),
+            path: path.into(),
+        };
+        assert!(read("", "a").check().is_err(), "empty id");
+        assert!(read(&"x".repeat(MAX_ID_CHARS), "a").check().is_ok());
+        assert!(read(&"x".repeat(MAX_ID_CHARS + 1), "a").check().is_err());
+        assert!(read("1", "").check().is_err(), "empty path");
+
+        let usage = Outgoing::Usage {
+            model: None,
+            input_tokens: MAX_SAFE_INTEGER + 1,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+        };
+        assert!(usage.check().is_err());
+    }
+
+    #[test]
+    fn write_size_is_measured_after_decoding() {
+        use base64::Engine as _;
+        let b64 = base64::engine::general_purpose::STANDARD;
+        for n in [0usize, 1, 2, 3, 4, 5, 1000] {
+            assert_eq!(decoded_len(&b64.encode(vec![7u8; n])), n, "{n} bytes");
+        }
+        let write = |bytes: usize| Outgoing::WriteFile {
+            id: "1".into(),
+            path: "a".into(),
+            content_b64: b64.encode(vec![0u8; bytes]),
+            append: false,
+        };
+        assert!(
+            write(0).check().is_ok(),
+            "an empty write makes an empty file"
+        );
+        assert!(write(MAX_FILE_BYTES).check().is_ok());
+        assert!(write(MAX_FILE_BYTES + 1).check().is_err());
     }
 
     #[test]
