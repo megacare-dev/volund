@@ -119,7 +119,7 @@
   th, td { text-align: left; vertical-align: top; padding: 9px 10px; border-bottom: 1px solid var(--line); }
   th { font-weight: 600; color: var(--ink-2); background: var(--surface-2); }
   .table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
-  .table-wrap table { min-width: 560px; }
+  .table-wrap td:first-child code, .table-wrap td.mono { white-space: nowrap; }
   td.phase { font-family: var(--display); font-weight: 600; white-space: nowrap; }
 
   .budget { display: flex; height: 38px; border-radius: 10px; overflow: hidden; border: 1px solid var(--line); margin-top: 6px; }
@@ -205,13 +205,14 @@
             <li>LLM client ที่ stream ทุก call, retry เองเมื่อเจอ 429/5xx และไม่ส่ง request ที่โดนปฏิเสธ (400) ซ้ำทั้งที่ยังไม่ได้แก้</li>
             <li>loop เดียวที่รันงานได้ครบรอบ (ใช้เทียบกับ sample ของผู้จัด)</li>
             <li><code>kit check --cancel-test</code> ผ่านทุกขั้น โดยใช้ mock model แทนโมเดลจริง build ใช้เวลา 173 วินาที</li>
-            <li>เทสต์ 57 ข้อผ่านหมด รวมเทสต์ที่รันทั้ง task ผ่าน WebSocket จริง</li>
+            <li>MCP client <span class="chip done">M2</span> คุยกับแอปของโจทย์ผ่านคำขอ <code>http</code> ได้แล้ว งาน MCP ของ kit รันผ่านในเทสต์</li>
+            <li>เทสต์ 67 ข้อผ่านหมด รวมเทสต์ที่รันทั้ง task ผ่าน WebSocket จริง</li>
           </ul>
         </div>
         <div class="card status" style="border-left-color: var(--wait)">
           <h3>กำลังทำ / รอ <span class="chip now">M2</span> <span class="chip wait">รอ GCP</span></h3>
           <ul>
-            <li><b>M2 กำลังทำ:</b> MCP client สำหรับแอปในงาน world และ driver ที่ให้ World Model กับ State Machine คุม loop</li>
+            <li><b>M2 กำลังทำ:</b> driver ที่ให้ World Model กับ State Machine คุม loop แทน loop เดียว</li>
             <li><b>รอโปรเจกต์ GCP:</b> baseline A0 และการรันกับโมเดลจริงครั้งแรก ต้องมีโปรเจกต์ที่เปิด Vertex AI และงบรายเดือนก่อน</li>
             <li>สิทธิ์ dataset บน Hugging Face ได้แล้ว</li>
           </ul>
@@ -460,8 +461,8 @@
           </g>
           <g font-size="11.5" fill="#444d58">
             <text x="450" y="15" text-anchor="middle">ไม่มี constraint ให้คำนวณ: ข้าม MODEL/SOLVE</text>
-            <text x="298" y="185" text-anchor="middle" font-size="10.5">ผ่าน</text>
-            <text x="449" y="185" text-anchor="middle" font-size="10.5">ผ่าน</text>
+            <text x="300" y="162" text-anchor="middle" font-size="10.5">ผ่าน</text>
+            <text x="450" y="162" text-anchor="middle" font-size="10.5">ผ่าน</text>
             <text x="150" y="240" text-anchor="middle">ไม่ผ่าน</text>
             <text x="440" y="240" text-anchor="middle">มีช่องโหว่</text>
             <text x="300" y="304" text-anchor="middle" font-size="10.5">snapshot → แก้ → เก็บเมื่อคะแนนไม่ลด (Δ≥0)</text>
@@ -549,7 +550,7 @@
           <tr><td><code>volund-world</code></td><td>World Model, ด่านก่อนจบ, ค่าประมาณคะแนน</td><td><span class="chip done">มีแล้ว</span> <span class="chip now">ต่อเข้า loop: M2</span></td></tr>
           <tr><td><code>volund-fsm</code></td><td>Phase State Machine เป็น pure function</td><td><span class="chip done">มีแล้ว</span> <span class="chip now">ต่อเข้า loop: M2</span></td></tr>
           <tr><td><code>volund-mock</code></td><td>โมเดลปลอมที่ตอบตามสคริปต์ ใช้ในเทสต์และ <code>kit check</code> ก่อนมีโมเดลจริง ไม่อยู่ในงานที่ส่ง</td><td><span class="chip done">M1</span></td></tr>
-          <tr><td>MCP client</td><td>คุยกับแอปของโจทย์ (JSON-RPC ผ่านคำขอ <code>http</code>) ถ้ามี tool ไม่เกิน 128 ตัวจะส่งให้โมเดลตรง ๆ ถ้ามากกว่านั้นจะให้ค้นด้วย <code>mcp_find</code> แล้วเรียกด้วย <code>mcp_call</code></td><td><span class="chip now">M2</span></td></tr>
+          <tr><td><code>volund-mcp</code></td><td>คุยกับแอปของโจทย์ (JSON-RPC ผ่านคำขอ <code>http</code>) ถ้ามี tool ไม่เกิน 128 ตัวจะส่งให้โมเดลตรง ๆ ถ้ามากกว่านั้นจะให้ค้นด้วย <code>mcp_find</code> แล้วเรียกด้วย <code>mcp_call</code></td><td><span class="chip done">M2</span></td></tr>
         </table>
       </div>
       <p class="note" style="margin-top:14px">build: container ของผู้จัดไม่มี Rust ไฟล์ <code>submission.yaml</code> จึงติดตั้ง Rust 1.98.1 ลงใน <code>/tmp</code> แล้ว build แล้ว copy มาเฉพาะ binary ส่วน <code>serve.py</code> กับ <code>harness.py</code> มีไว้แค่เปิด binary ทุก dependency ใช้ license แบบ permissive (MIT, Apache-2.0, BSD, ISC)</p>

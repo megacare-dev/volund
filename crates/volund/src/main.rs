@@ -3,7 +3,7 @@
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use volund::server::{Settings, serve};
+use volund::server::{AgentKind, Settings, serve};
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -38,10 +38,12 @@ async fn main() -> ExitCode {
         volund_proto::PROTOCOL_VERSION,
         llm.as_ref().map_or("(not configured)", |c| c.model()),
     );
+    let agent = AgentKind::from_setting(std::env::var("VOLUND_AGENT").ok().as_deref());
     let settings = Settings {
         llm,
         llm_problem,
         compact_at,
+        agent,
     };
     match serve(listener, settings).await {
         Ok(()) => ExitCode::SUCCESS,

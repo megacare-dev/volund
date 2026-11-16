@@ -16,6 +16,7 @@ use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use volund_proto::{Incoming, MAX_FRAME_BYTES, Outgoing};
 
 use crate::agent::Agent;
+use crate::driver::Driver;
 use crate::link::{Link, Out};
 
 /// After `cancel`, how long the agent may take to hand back its answer before it is stopped. The
@@ -30,6 +31,25 @@ pub struct Settings {
     pub llm: Option<Arc<volund_llm::Client>>,
     pub llm_problem: String,
     pub compact_at: u64,
+    pub agent: AgentKind,
+}
+
+/// Which agent works the task (`VOLUND_AGENT`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentKind {
+    /// The phase driver: world model and state machine (DESIGN.md §3–4).
+    Phases,
+    /// One tool-calling loop, the A1 ablation.
+    Loop,
+}
+
+impl AgentKind {
+    pub fn from_setting(value: Option<&str>) -> Self {
+        match value {
+            Some("loop") => Self::Loop,
+            _ => Self::Phases,
+        }
+    }
 }
 
 /// Serves tasks until the listener fails.
@@ -87,7 +107,10 @@ async fn session(stream: TcpStream, settings: Settings) -> Result<(), String> {
         let settings = settings.clone();
         async move {
             match settings.llm {
-                Some(llm) => Agent::new(link, llm, settings.compact_at).run().await,
+                Some(llm) => match settings.agent {
+                    AgentKind::Phases => Driver::new(link, llm, settings.compact_at).run().await,
+                    AgentKind::Loop => Agent::new(link, llm, settings.compact_at).run().await,
+                },
                 None => Err(settings.llm_problem),
             }
         }

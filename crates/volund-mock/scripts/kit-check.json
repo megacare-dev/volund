@@ -6,19 +6,48 @@
     },
     {
       "when": "hello.txt",
+      "summary": "done",
       "turns": [
         {"calls": [{"name": "write_file", "arguments": {"path": "hello.txt", "content": "HELLO\n"}}]},
         {"calls": [{"name": "bash", "arguments": {"command": "cat hello.txt"}}]},
         {"text": "done"}
-      ]
+      ],
+      "phases": {
+        "INTAKE": [
+          {"calls": [{"name": "world_deliverable", "arguments": {"path": "hello.txt", "required": ["the single line HELLO"]}}]},
+          {"text": "Recorded the one deliverable."}
+        ],
+        "WRITE": [
+          {"calls": [{"name": "write_file", "arguments": {"path": "hello.txt", "content": "HELLO\n"}}]},
+          {"calls": [{"name": "world_deliverable", "arguments": {"path": "hello.txt", "status": "written"}}]},
+          {"text": "Wrote hello.txt."}
+        ],
+        "VERIFY": [
+          {"calls": [{"name": "read_file", "arguments": {"path": "hello.txt"}}]},
+          {"text": "hello.txt holds HELLO; no issues."}
+        ]
+      }
     },
     {
       "when": "secret_word",
+      "summary": "done",
       "turns": [
         {"calls": [{"name": "apps__secret_word", "arguments": {}}]},
         {"calls": [{"name": "write_file", "arguments": {"path": "mcp.txt", "content": "{{last_tool_line}}\n"}}]},
         {"text": "done"}
-      ]
+      ],
+      "phases": {
+        "INTAKE": [
+          {"calls": [{"name": "world_deliverable", "arguments": {"path": "mcp.txt", "required": ["the word secret_word returns"]}}]},
+          {"text": "Recorded the deliverable."}
+        ],
+        "WRITE": [
+          {"calls": [{"name": "apps__secret_word", "arguments": {}}]},
+          {"calls": [{"name": "write_file", "arguments": {"path": "mcp.txt", "content": "{{last_tool_line}}\n"}}]},
+          {"text": "Wrote mcp.txt."}
+        ],
+        "VERIFY": [{"text": "No issues."}]
+      }
     },
     {
       "when": "design memo",
@@ -26,7 +55,17 @@
       "turns": [
         {"calls": [{"name": "write_file", "arguments": {"path": "memo.md", "content": "# Draft\n"}}]},
         {"calls": [{"name": "bash", "arguments": {"command": "sleep 20; wc -c memo.md"}}]}
-      ]
+      ],
+      "phases": {
+        "INTAKE": [
+          {"calls": [{"name": "world_deliverable", "arguments": {"path": "memo.md"}}]},
+          {"text": "Recorded the memo."}
+        ],
+        "WRITE": [
+          {"calls": [{"name": "write_file", "arguments": {"path": "memo.md", "content": "# Draft\n"}}]},
+          {"calls": [{"name": "bash", "arguments": {"command": "sleep 20; wc -c memo.md"}}]}
+        ]
+      }
     }
   ],
   "default": [{"text": "OK"}]

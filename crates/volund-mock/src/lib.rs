@@ -23,6 +23,8 @@
 //! ```
 //!
 //! A request with `tool_choice: "none"` (the harness asking for its final summary) gets `summary`.
+//! A script may also hold `phases`: turns by harness phase (`{"INTAKE": [...], "WRITE": [...]}`),
+//! played from the newest `Phase: <NAME>` opening, so the phase driver can be scripted too.
 //!
 //! `{{last_tool_line}}` in a call's arguments becomes the first line of the newest tool result, so a
 //! script can pass on what a tool returned (the kit's MCP task hands back a word chosen at run time).
@@ -131,30 +133,50 @@ async fn handle(
 }
 
 /// The turn the script plays for this request. Asked for an answer without tools (`tool_choice:
-/// "none"`, the final summary), it answers in words, as a model does: the script's `summary`, or
-/// `done`.
+/// "none"`, the final summary), it answers in words, as a model does: the script's `summary` (or the
+/// top-level one), or `done`.
+///
+/// A script with `phases` plays by phase when the conversation holds a harness phase opening (a user
+/// message starting `Phase: <NAME>`): the turns under that name, counted from the newest opening.
 fn pick_turn(script: &Value, request: &Value) -> Value {
-    if request["tool_choice"] == "none" {
-        return json!({"text": script["summary"].as_str().unwrap_or("done")});
-    }
     let messages = request["messages"].as_array().cloned().unwrap_or_default();
     let task = messages
         .iter()
         .find(|m| m["role"] == "user")
         .map(|m| text_of(&m["content"]))
         .unwrap_or_default();
-    let played = messages.iter().filter(|m| m["role"] == "assistant").count();
     let chosen = script["scripts"]
         .as_array()
         .into_iter()
         .flatten()
         .find(|s| s["when"].as_str().is_some_and(|w| task.contains(w)));
-    let (turns, repeat_last) = match chosen {
-        Some(s) => (
-            s["turns"].clone(),
-            s["repeat_last"].as_bool().unwrap_or(false),
+    if request["tool_choice"] == "none" {
+        let summary = chosen
+            .and_then(|s| s["summary"].as_str())
+            .or_else(|| script["summary"].as_str())
+            .unwrap_or("done");
+        return json!({"text": summary});
+    }
+    let repeat_last = chosen.is_some_and(|s| s["repeat_last"].as_bool().unwrap_or(false));
+    let phased = chosen
+        .and_then(|s| s["phases"].as_object())
+        .zip(current_phase(&messages));
+    let (turns, played) = match (chosen, phased) {
+        (_, Some((phases, (name, start)))) => (
+            phases.get(&name).cloned().unwrap_or(Value::Null),
+            messages[start..]
+                .iter()
+                .filter(|m| m["role"] == "assistant")
+                .count(),
         ),
-        None => (script["default"].clone(), false),
+        (Some(s), None) => (
+            s["turns"].clone(),
+            messages.iter().filter(|m| m["role"] == "assistant").count(),
+        ),
+        (None, None) => (
+            script["default"].clone(),
+            messages.iter().filter(|m| m["role"] == "assistant").count(),
+        ),
     };
     let turns = turns.as_array().cloned().unwrap_or_default();
     match turns.get(played) {
@@ -162,6 +184,23 @@ fn pick_turn(script: &Value, request: &Value) -> Value {
         None if repeat_last && !turns.is_empty() => turns[turns.len() - 1].clone(),
         None => json!({"text": "done"}),
     }
+}
+
+/// The newest phase opening: its name and its index in the conversation.
+fn current_phase(messages: &[Value]) -> Option<(String, usize)> {
+    messages.iter().enumerate().rev().find_map(|(i, m)| {
+        if m["role"] != "user" {
+            return None;
+        }
+        let text = text_of(&m["content"]);
+        let name = text
+            .strip_prefix("Phase: ")?
+            .lines()
+            .next()?
+            .trim()
+            .to_owned();
+        Some((name, i))
+    })
 }
 
 /// Replaces `{{last_tool_line}}` in the turn's call arguments.

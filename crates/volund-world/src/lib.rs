@@ -274,6 +274,8 @@ pub struct World {
     pub workdir: String,
     /// Input files found by PROBE.
     pub files: Vec<FileEntry>,
+    /// What PROBE found in the task container: interpreters, libraries, converters, a writable /tmp.
+    pub environment: Vec<String>,
     pub deliverables: Vec<Deliverable>,
     pub params: Vec<Param>,
     pub constraints: Vec<Constraint>,
@@ -438,7 +440,60 @@ impl World {
                 let _ = writeln!(out, "- {a}");
             }
         }
+        if !self.environment.is_empty() {
+            let _ = writeln!(out, "Container: {}", self.environment.join("; "));
+        }
         out
+    }
+
+    /// A final message built from the record alone, for when the model cannot write one (time is up,
+    /// the task was cancelled, the model is not answering).
+    pub fn report(&self) -> String {
+        let mut out = String::new();
+        if self.deliverables.is_empty() {
+            let _ = writeln!(out, "No deliverable was recorded.");
+        } else {
+            let _ = writeln!(out, "Deliverables:");
+            for d in &self.deliverables {
+                let state = match d.status {
+                    DeliverableStatus::Missing => "not written",
+                    DeliverableStatus::Draft => "draft",
+                    DeliverableStatus::Written => "written",
+                    DeliverableStatus::Checked => "written and checked",
+                };
+                let _ = writeln!(out, "- {} ({state})", d.path);
+            }
+        }
+        if !self.constraints.is_empty() {
+            let _ = writeln!(out, "Requirements checked:");
+            for c in &self.constraints {
+                let _ = write!(out, "- {}: {}", c.id, c.text);
+                if let Some(v) = &c.computed {
+                    let _ = write!(out, " = {v}");
+                }
+                let _ = writeln!(out, " ({})", c.verdict);
+            }
+        }
+        if !self.actions.is_empty() {
+            let _ = writeln!(out, "Actions in the applications:");
+            for a in &self.actions {
+                let _ = writeln!(out, "- {} ({:?})", a.description, a.status);
+            }
+        }
+        if !self.assumptions.is_empty() {
+            let _ = writeln!(out, "Assumptions:");
+            for a in &self.assumptions {
+                let _ = writeln!(out, "- {a}");
+            }
+        }
+        let open: Vec<&Issue> = self.issues.iter().filter(|i| i.open).collect();
+        if !open.is_empty() {
+            let _ = writeln!(out, "Known limitations:");
+            for i in open {
+                let _ = writeln!(out, "- {}", i.text);
+            }
+        }
+        out.trim_end().to_owned()
     }
 }
 
@@ -556,6 +611,23 @@ mod tests {
             serde_json::from_str::<World>("{}").unwrap(),
             World::default()
         );
+    }
+
+    #[test]
+    fn the_report_stands_on_its_own_as_a_final_message() {
+        let mut world = World {
+            deliverables: vec![Deliverable::new("/app/output/memo.docx")],
+            constraints: vec![constraint("C1", Severity::Hard, Verdict::Pass)],
+            assumptions: vec!["ambient 35 °C".into()],
+            ..World::default()
+        };
+        world.deliverables[0].status = DeliverableStatus::Checked;
+        world.constraints[0].computed = Some("0.82 kN".into());
+        let report = world.report();
+        assert!(report.contains("- /app/output/memo.docx (written and checked)"));
+        assert!(report.contains("- C1: C1 text = 0.82 kN (pass)"));
+        assert!(report.contains("- ambient 35 °C"));
+        assert_eq!(World::default().report(), "No deliverable was recorded.");
     }
 
     #[test]

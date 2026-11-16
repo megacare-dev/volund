@@ -1,6 +1,7 @@
 //! Völund: an agent harness for Physical-Engineering's Last Exam. See DESIGN.md.
 
 pub mod agent;
+pub mod driver;
 pub mod link;
 pub mod mcp;
 pub mod server;

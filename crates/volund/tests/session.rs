@@ -14,7 +14,7 @@ use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio::time::{Instant, sleep_until, timeout};
 use tokio_tungstenite::tungstenite::Message;
-use volund::server::{Settings, serve};
+use volund::server::{AgentKind, Settings, serve};
 
 const KIT_SCRIPT: &str = include_str!("../../volund-mock/scripts/kit-check.json");
 /// The smoke and cancel tasks of `kit check` (kit/check.py), word for word.
@@ -29,7 +29,7 @@ async fn model(script: Value) -> volund_mock::Mock {
     volund_mock::start(TcpListener::bind("127.0.0.1:0").await.unwrap(), script)
 }
 
-async fn harness(llm: Option<&volund_mock::Mock>) -> SocketAddr {
+async fn harness(llm: Option<&volund_mock::Mock>, agent: AgentKind) -> SocketAddr {
     let llm = llm.map(|m| {
         let mut cfg = volund_llm::Config::from_vars(|name| match name {
             "MODEL_NAME" => Some("claude-opus-5-5".into()),
@@ -44,6 +44,7 @@ async fn harness(llm: Option<&volund_mock::Mock>) -> SocketAddr {
         llm,
         llm_problem: "the model is not configured: MODEL_NAME is not set".into(),
         compact_at: 150_000,
+        agent,
     };
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -243,7 +244,7 @@ fn mcp_stub(message: &Value) -> String {
 #[tokio::test]
 async fn the_kit_mcp_task_gets_its_word_through_http() {
     let m = model(kit_script()).await;
-    let addr = harness(Some(&m)).await;
+    let addr = harness(Some(&m), AgentKind::Loop).await;
     let mut first = task(MCP_TASK, Some(420));
     first["mcp_servers"] =
         json!([{"name": "apps", "url": MCP_URL, "transport": "streamable-http"}]);
@@ -290,7 +291,7 @@ async fn the_kit_mcp_task_gets_its_word_through_http() {
 #[tokio::test]
 async fn the_kit_smoke_task_writes_hello_and_reports_done() {
     let m = model(kit_script()).await;
-    let addr = harness(Some(&m)).await;
+    let addr = harness(Some(&m), AgentKind::Loop).await;
     let run = evaluate(addr, task(SMOKE, Some(600)), Behaviour::default()).await;
     assert_eq!(run.end, json!({"type": "done", "final_message": "done"}));
     assert_eq!(
@@ -339,7 +340,7 @@ async fn the_kit_smoke_task_writes_hello_and_reports_done() {
 #[tokio::test]
 async fn cancel_gets_done_within_the_grace_period_and_stops_model_calls() {
     let m = model(kit_script()).await;
-    let addr = harness(Some(&m)).await;
+    let addr = harness(Some(&m), AgentKind::Loop).await;
     let how = Behaviour {
         cancel_after_sleep: Some(Duration::from_millis(500)),
         ..Behaviour::default()
@@ -369,7 +370,7 @@ async fn near_the_deadline_it_asks_for_a_summary_without_tools() {
         "summary": "Summary from the model."
     }))
     .await;
-    let addr = harness(Some(&m)).await;
+    let addr = harness(Some(&m), AgentKind::Loop).await;
     let how = Behaviour {
         sleep_reply_after: Some(Duration::from_millis(300)),
         ..Behaviour::default()
@@ -391,7 +392,7 @@ async fn near_the_deadline_it_asks_for_a_summary_without_tools() {
 
 #[tokio::test]
 async fn without_model_settings_the_task_ends_with_an_error() {
-    let addr = harness(None).await;
+    let addr = harness(None, AgentKind::Loop).await;
     let run = evaluate(addr, task(SMOKE, Some(600)), Behaviour::default()).await;
     assert_eq!(run.end["type"], "error");
     assert!(run.end["message"].as_str().unwrap().contains("MODEL_NAME"));
@@ -399,7 +400,7 @@ async fn without_model_settings_the_task_ends_with_an_error() {
 
 #[tokio::test]
 async fn a_first_frame_that_is_not_a_task_is_refused() {
-    let addr = harness(None).await;
+    let addr = harness(None, AgentKind::Loop).await;
     let run = evaluate(addr, json!({"type": "cancel"}), Behaviour::default()).await;
     assert_eq!(
         run.end,
@@ -414,7 +415,7 @@ async fn a_malformed_request_from_the_model_never_reaches_the_evaluator() {
         {"text": "Nothing to do."}
     ]}]}))
     .await;
-    let addr = harness(Some(&m)).await;
+    let addr = harness(Some(&m), AgentKind::Loop).await;
     let run = evaluate(
         addr,
         task("run an empty command", None),
@@ -440,7 +441,7 @@ async fn a_malformed_request_from_the_model_never_reaches_the_evaluator() {
 #[tokio::test]
 async fn a_connection_that_sends_nothing_is_closed_quietly() {
     let m = model(kit_script()).await;
-    let addr = harness(Some(&m)).await;
+    let addr = harness(Some(&m), AgentKind::Loop).await;
     let (ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
         .await
         .unwrap();
@@ -453,4 +454,181 @@ async fn a_connection_that_sends_nothing_is_closed_quietly() {
     .await
     .unwrap();
     assert_eq!(run.end["type"], "done");
+}
+
+// The phase driver on the same tasks: PROBE, INTAKE, WRITE, CHECK, VERIFY, FINALIZE.
+
+fn transitions(run: &Run) -> Vec<(String, String)> {
+    run.logs
+        .iter()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter(|v| v["kind"] == "transition")
+        .map(|v| {
+            (
+                v["phase"].as_str().unwrap().to_owned(),
+                v["to"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn phases_the_kit_smoke_task_runs_every_phase_in_order() {
+    let m = model(kit_script()).await;
+    let addr = harness(Some(&m), AgentKind::Phases).await;
+    let run = evaluate(addr, task(SMOKE, Some(600)), Behaviour::default()).await;
+    assert_eq!(run.end, json!({"type": "done", "final_message": "done"}));
+    assert_eq!(
+        run.files.get("/app/hello.txt").map(Vec::as_slice),
+        Some(&b"HELLO\n"[..])
+    );
+    assert_eq!(run.files.len(), 1, "no other files");
+    let path: Vec<String> = transitions(&run)
+        .into_iter()
+        .map(|(from, _)| from)
+        .collect();
+    assert_eq!(path, ["PROBE", "INTAKE", "WRITE", "CHECK", "VERIFY"]);
+    let requests = m.requests();
+    let tools = |n: usize| -> Vec<String> {
+        requests[n]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["function"]["name"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    assert!(
+        tools(0).contains(&"world_deliverable".to_owned()),
+        "INTAKE records"
+    );
+    assert!(!tools(0).contains(&"world_issue".to_owned()));
+    let verify = requests
+        .iter()
+        .position(|r| {
+            r["messages"][0]["content"][0]["text"]
+                .as_str()
+                .is_some_and(|t| t.contains("checking another engineer"))
+        })
+        .expect("a fresh VERIFY conversation");
+    assert_eq!(
+        requests[verify]["messages"].as_array().unwrap().len(),
+        3,
+        "system, task, phase opening"
+    );
+    assert_eq!(
+        requests.last().unwrap()["tool_choice"],
+        "none",
+        "FINALIZE asks for the summary"
+    );
+}
+
+#[tokio::test]
+async fn phases_the_kit_mcp_task_works_through_the_driver() {
+    let m = model(kit_script()).await;
+    let addr = harness(Some(&m), AgentKind::Phases).await;
+    let mut first = task(MCP_TASK, Some(420));
+    first["mcp_servers"] =
+        json!([{"name": "apps", "url": MCP_URL, "transport": "streamable-http"}]);
+    let run = evaluate(addr, first, Behaviour::default()).await;
+    assert_eq!(run.end["type"], "done");
+    assert_eq!(
+        run.files
+            .get("/app/mcp.txt")
+            .map(|b| String::from_utf8_lossy(b).trim().to_owned()),
+        Some(SECRET.to_owned())
+    );
+    assert!(run.mcp_methods.contains(&"tools/call".to_owned()));
+}
+
+#[tokio::test]
+async fn phases_cancel_still_gets_done_in_time_with_the_record() {
+    let m = model(kit_script()).await;
+    let addr = harness(Some(&m), AgentKind::Phases).await;
+    let how = Behaviour {
+        cancel_after_sleep: Some(Duration::from_millis(500)),
+        ..Behaviour::default()
+    };
+    let run = evaluate(addr, task(LONG, Some(21_600)), how).await;
+    let waited = run.ended.unwrap() - run.cancel_sent.expect("cancel was sent");
+    assert_eq!(run.end["type"], "done");
+    assert!(
+        waited < Duration::from_secs(3),
+        "done {waited:?} after cancel"
+    );
+    let message = run.end["final_message"].as_str().unwrap();
+    assert!(
+        message.contains("memo.md"),
+        "the summary comes from the record: {message}"
+    );
+    let calls_at_cancel = m.requests().len();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(
+        m.requests().len(),
+        calls_at_cancel,
+        "no model call after the cancel"
+    );
+}
+
+#[tokio::test]
+async fn phases_a_missing_deliverable_fails_check_and_fix_writes_it() {
+    let m = model(json!({"scripts": [{"when": "lazy", "summary": "Wrote out.md.", "phases": {
+        "INTAKE": [
+            {"calls": [{"name": "world_deliverable", "arguments": {"path": "out.md"}}]},
+            {"text": "Recorded."}
+        ],
+        "WRITE": [{"text": "All done."}],
+        "FIX": [
+            {"calls": [{"name": "write_file", "arguments": {"path": "out.md", "content": "# Result\n"}}]},
+            {"text": "Wrote the missing file."}
+        ],
+        "VERIFY": [{"text": "No issues."}]
+    }}]}))
+    .await;
+    let addr = harness(Some(&m), AgentKind::Phases).await;
+    let run = evaluate(
+        addr,
+        task("a lazy task: write out.md", Some(600)),
+        Behaviour::default(),
+    )
+    .await;
+    assert_eq!(
+        run.end,
+        json!({"type": "done", "final_message": "Wrote out.md."})
+    );
+    assert_eq!(
+        run.files.get("/app/out.md").map(Vec::as_slice),
+        Some(&b"# Result\n"[..])
+    );
+    let steps = transitions(&run);
+    assert!(steps.contains(&("CHECK".into(), "FIX".into())), "{steps:?}");
+    assert!(steps.contains(&("FIX".into(), "CHECK".into())), "{steps:?}");
+    assert_eq!(
+        steps.last().unwrap(),
+        &("VERIFY".to_owned(), "FINALIZE".to_owned())
+    );
+    let fix_opening = m.requests().iter().find_map(|r| {
+        r["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .rev()
+            .find_map(|msg| {
+                let text = msg["content"]
+                    .as_str()
+                    .or_else(|| msg["content"][0]["text"].as_str())?;
+                text.starts_with("Phase: FIX").then(|| text.to_owned())
+            })
+    });
+    let fix_opening = fix_opening.expect("a FIX opening");
+    assert!(
+        fix_opening.contains("Failed checks:\n- out.md: missing"),
+        "{fix_opening}"
+    );
+}
+
+#[tokio::test]
+async fn phases_without_model_settings_the_task_ends_with_an_error() {
+    let addr = harness(None, AgentKind::Phases).await;
+    let run = evaluate(addr, task(SMOKE, Some(600)), Behaviour::default()).await;
+    assert_eq!(run.end["type"], "error");
 }
