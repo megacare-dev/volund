@@ -3,7 +3,8 @@
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use volund::server::{AgentKind, Settings, serve};
+use volund::ablation::Level;
+use volund::server::{Settings, serve};
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -23,27 +24,39 @@ async fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let (llm, llm_problem) = match volund_llm::Config::from_env().and_then(volund_llm::Client::new)
-    {
-        Ok(client) => (Some(Arc::new(client)), String::new()),
-        Err(problem) => (None, format!("the model is not configured: {problem}")),
+    let (mut llm, mut llm_problem) =
+        match volund_llm::Config::from_env().and_then(volund_llm::Client::new) {
+            Ok(client) => (Some(Arc::new(client)), String::new()),
+            Err(problem) => (None, format!("the model is not configured: {problem}")),
+        };
+    // A level that is not one would run a different experiment than asked: refuse every task.
+    let level = match Level::from_setting(std::env::var("VOLUND_ABLATION").ok().as_deref()) {
+        Ok(level) => level,
+        Err(problem) => {
+            llm = None;
+            llm_problem = format!("the harness is not configured: {problem}");
+            Level::FULL
+        }
     };
     let compact_at = std::env::var("COMPACT_AT_TOKENS")
         .ok()
         .and_then(|n| n.parse().ok())
         .unwrap_or(150_000);
     eprintln!(
-        "volund {} (protocol {}) listening on 0.0.0.0:{port}, model {}",
+        "volund {} (protocol {}) listening on 0.0.0.0:{port}, model {}, ablation {}",
         volund::VERSION,
         volund_proto::PROTOCOL_VERSION,
         llm.as_ref().map_or("(not configured)", |c| c.model()),
+        level.name(),
     );
-    let agent = AgentKind::from_setting(std::env::var("VOLUND_AGENT").ok().as_deref());
+    if !llm_problem.is_empty() {
+        eprintln!("volund: {llm_problem}");
+    }
     let settings = Settings {
         llm,
         llm_problem,
         compact_at,
-        agent,
+        level,
     };
     match serve(listener, settings).await {
         Ok(()) => ExitCode::SUCCESS,

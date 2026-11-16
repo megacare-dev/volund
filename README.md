@@ -6,9 +6,9 @@ engineering tasks. Written in Rust.
 
 **Status:** M2. A phase driver works each task: the state machine in `volund-fsm` picks the phase, the model records
 the task in the world model through `world_*` tools, scripted phases probe the container and check the deliverables,
-and a fresh conversation verifies the work. The task's applications are reached over MCP. The single loop of M1 stays
-available as ablation A1 (`VOLUND_AGENT=loop`). The design (in Thai) is in [DESIGN.md](DESIGN.md); a page for the team
-is [docs/design.html](docs/design.html).
+and a fresh conversation verifies the work. The task's applications are reached over MCP. `VOLUND_ABLATION` picks a
+lower rung of the ablation ladder (below). The design (in Thai) is in [DESIGN.md](DESIGN.md); a page for the team is
+[docs/design.html](docs/design.html).
 
 ## Layout
 
@@ -30,6 +30,7 @@ is [docs/design.html](docs/design.html).
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
+python3 -m unittest discover -s tools
 ```
 
 The toolchain is pinned in `rust-toolchain.toml` (1.98.1). The session tests in `crates/volund/tests` play whole tasks
@@ -58,10 +59,37 @@ Set under `env:` in `submission.yaml`.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `VOLUND_AGENT` | `phases` | `loop` runs the single tool-calling loop instead of the phase driver |
+| `VOLUND_ABLATION` | `A6` (the full harness) | `A1` to `A5` run a lower rung of the ablation ladder; any other value makes every task end with an `error` |
 | `REASONING_EFFORT` | the model's highest (`max` for Claude and GLM, `high` otherwise) | Sent with every call; `omit` sends none |
 | `MAX_OUTPUT_TOKENS` | `32000` | Output tokens asked for per call (halved automatically if the endpoint refuses) |
 | `COMPACT_AT_TOKENS` | `150000` | Prompt size past which tool output the model has already read is trimmed |
+
+## Ablation levels
+
+Each level adds one part to the level below it (DESIGN.md §9), so two neighbouring levels differ in that part alone.
+
+| Level | What works the task |
+|---|---|
+| `A1` | One tool-calling loop, like the organisers' `custom-openai` sample (A0) |
+| `A2` | The loop, opening with what PROBE found: the input files and the container's tools |
+| `A3` | The loop with the world: `world_*` tools, the record re-rendered when old turns are dropped, a summary built from it on cancel |
+| `A4` | The phase driver: PROBE → INTAKE → WRITE → CHECK ↺ FIX → FINALIZE, finishing through the finish gate |
+| `A5` | A4 with MODEL and SOLVE (the executable model) for tasks with constraints |
+| `A6` | A5 with VERIFY in a fresh conversation and the Δ≥0 commit gate on every FIX: the entry |
+
+## Run logs to CSV
+
+The harness logs one JSON line per event (`kind`: `start`, `probe`, `transition`, `tool`, `llm`, `check`, `context`,
+`model_tests`, `rollback`, `verify_changed`). After an `eval/run.py` run:
+
+```bash
+python3 tools/logs_to_csv.py runs/<run> -o csv/
+```
+
+It reads each trial's `agent/serve.log` (or the kit's `<name>.txt` when serve.log holds no events) and the run's
+`results.json`, and writes `events.csv` (one row per event), `phases.csv` (per trial and phase: visits, seconds, tool
+and model calls, tokens) and `tasks.csv` (per trial: level, model, score, the phases it went through, the last
+transition's reason, FIX rounds, rollbacks, tokens).
 
 ## License
 

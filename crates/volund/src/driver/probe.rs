@@ -9,6 +9,14 @@ use crate::link::Link;
 
 /// Most files recorded; the rest are left for the model to find.
 const MAX_FILES: usize = 500;
+/// Input files listed in a phase's opening; the rest are counted.
+const FILES_SHOWN: usize = 150;
+
+/// Every visible file under the task's folders, one path per line in byte order. PROBE keeps this
+/// list in [`START_FILES`]; CHECK lists the folders the same way to find files added since.
+pub const LIST_FILES: &str = r#"for d in "$PWD" /app /filesystem; do [ -d "$d" ] && find "$d" -maxdepth 8 -type f -not -path '*/.*' -not -path '*/node_modules/*' 2>/dev/null; done | LC_ALL=C sort -u"#;
+/// Where PROBE keeps [`LIST_FILES`]'s output, in the task container.
+pub const START_FILES: &str = "/tmp/volund/start-files.txt";
 
 const SCRIPT: &str = r#"tab="$(printf '\t')"
 echo '### files'
@@ -25,12 +33,18 @@ echo '### tmp'
 if mkdir -p /tmp/volund 2>/dev/null && touch /tmp/volund/.probe 2>/dev/null; then echo writable; else echo read-only; fi
 "#;
 
+/// The probe, ending with the file list kept for CHECK (silent: a failed write leaves no list, and
+/// CHECK then skips the stray-file check).
+fn script() -> String {
+    format!("{SCRIPT}{{ {LIST_FILES}; }} 2>/dev/null > {START_FILES} || rm -f {START_FILES}\n")
+}
+
 /// Runs the probe and records what it found. Returns a one-line summary for the log.
 pub async fn run(link: &Link, world: &mut World) -> String {
     let reply = link
         .request(|id| Outgoing::Exec {
             id,
-            command: SCRIPT.to_owned(),
+            command: script(),
             timeout_sec: Some(90),
         })
         .await;
@@ -49,6 +63,21 @@ pub async fn run(link: &Link, world: &mut World) -> String {
     world.files = files;
     world.environment = environment;
     summary
+}
+
+/// The input files as a phase's opening lists them.
+pub fn input_files(world: &World) -> String {
+    let mut out = String::from("Input files:\n");
+    for f in world.files.iter().take(FILES_SHOWN) {
+        out.push_str(&format!("- {} ({} bytes)\n", f.path, f.bytes));
+    }
+    if world.files.len() > FILES_SHOWN {
+        out.push_str(&format!(
+            "- ... and {} more\n",
+            world.files.len() - FILES_SHOWN
+        ));
+    }
+    out
 }
 
 /// Splits the probe's output into input files and facts about the container.

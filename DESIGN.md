@@ -3,7 +3,7 @@
 > ชื่อ Völund (Völundr) มาจากช่างตีเหล็กและนักประดิษฐ์ชั้นครูในตำนาน Norse ผู้สร้างของใช้งานได้จริงจากวัตถุดิบ
 > ตรงกับงานนี้ที่รับโฟลเดอร์โปรเจกต์มาแล้วต้องส่งงานวิศวกรรมที่ใช้ได้จริง
 
-- **สถานะ:** M2 โค้ดเสร็จ: driver ให้ State Machine คุม phase, World บันทึกงานผ่าน tool `world_*`, MCP client ใช้ได้ `kit check` ผ่านทุกขั้นกับ mock model ส่วนที่ยังรอคือการรันกับโมเดลจริง (รอโปรเจกต์ GCP)
+- **สถานะ:** M2 โค้ดเสร็จ: driver ให้ State Machine คุม phase, World บันทึกงานผ่าน tool `world_*`, MCP client ใช้ได้ `kit check` ผ่านทุกขั้นกับ mock model สวิตช์ ablation A1–A6, CHECK ไฟล์ทดค้างกับ hash รอบ VERIFY และ script log→CSV พร้อมแล้ว ส่วนที่ยังรอคือการรันกับโมเดลจริง (รอโปรเจกต์ GCP)
 - **ปรับปรุงล่าสุด:** 16 พ.ย. 2026
 - **ฉบับอ่านง่ายสำหรับทีม:** [docs/design.html](docs/design.html)
 - **ปิดรับงาน:** 5 ม.ค. 2027 23:59 UTC (**6 ม.ค. 06:59 เวลาไทย**) ทีมตั้งเป้าส่งภายใน 4 ม.ค.
@@ -124,7 +124,15 @@ PROBE → INTAKE → MODEL → SOLVE → WRITE → CHECK ─ผ่าน→ VERI
 - ทุก path ที่ต้องส่งมีอยู่จริงและไม่ว่าง
 - เปิดได้ตาม format: zip (list entry ได้), docx/xlsx/pptx, pdf (header), ifc (header ISO-10303-21 และ parse ได้ถ้ามี library), json/yaml/csv parse ได้
 - ไม่มีไฟล์ทดค้างในโฟลเดอร์ที่ถูกตรวจ (`/filesystem/`, `/app/files/`, `/app/output/`) **ไฟล์ทดทั้งหมดอยู่ใน `/tmp/volund/` เท่านั้น**
+  - PROBE เก็บรายชื่อไฟล์ทุกไฟล์ใต้ workdir, `/app` และ `/filesystem` (ไม่นับไฟล์ซ่อน) ไว้ที่ `/tmp/volund/start-files.txt`
+  - CHECK ใช้ `comm` ใน container หาไฟล์ที่เพิ่มขึ้นมา แล้วตัดไฟล์ที่เป็นงานส่งออก (ถ้างานส่งเป็นโฟลเดอร์ ไฟล์ในโฟลเดอร์นั้นนับเป็นงานส่ง) ที่เหลือคือไฟล์ทด ทำให้ check ไม่ผ่าน และ FIX จะเห็นรายชื่อไฟล์
+  - ข้อความบอกให้ย้ายไฟล์ทดไป `/tmp/volund` หรือถ้าไฟล์นั้นเป็นส่วนหนึ่งของงาน ให้บันทึกเป็น deliverable แทน เพื่อไม่ให้ FIX ลบไฟล์ที่แอปของโจทย์สร้างหรือไฟล์ที่ลืมบันทึก
+  - ถ้า PROBE เก็บรายชื่อไม่ได้ (เช่น `/tmp` เขียนไม่ได้) จะข้าม check นี้ ไม่นับว่าผ่าน
 - ไฟล์งานส่งไม่เปลี่ยนระหว่าง VERIFY (เทียบ hash ก่อนกับหลัง)
+  - ก่อน VERIFY: hash งานส่งทีละชิ้น (โฟลเดอร์ใช้ hash เดียวของทั้งโฟลเดอร์) และ copy ไว้ที่ `/tmp/volund/before-verify`
+  - หลัง VERIFY: hash ใหม่ ถ้าต่างจากเดิมให้คืนไฟล์จาก copy แล้ว hash ซ้ำ check "deliverables unchanged by VERIFY" ผ่านเมื่อคืนได้ครบเท่านั้น
+  - การคืนไฟล์ใช้วิธีเขียนทับ ไฟล์ที่ VERIFY เพิ่มเข้าไปในโฟลเดอร์งานส่งจึงไม่ถูกลบ ในกรณีนั้น check ไม่ผ่าน แล้วงานไปต่อที่ FIX
+  - หลัง VERIFY ตรวจไฟล์ทดค้างอีกรอบด้วย เพราะถ้าผ่าน VERIFY แล้วงานจะไป FINALIZE เลยโดยไม่ผ่าน CHECK อีก
 
 ## 5. หลักการ 14 ข้อ (ใช้ตรวจทุกการเปลี่ยนแปลง)
 
@@ -219,7 +227,11 @@ evaluator ─ws─► volund (serve container: 2 CPU / 4 GB)
 - **ต้องตั้งงบค่า VM และค่าโมเดลก่อน run ที่เสียเงินครั้งแรก** การเรียกโมเดลผ่าน `kit/model_proxy` คิดเงินจากโปรเจกต์ GCP ของเรา ทั้งค่า harness และค่า judge
 - judge: ค่าเริ่มต้นคือ `claude-opus-5-5` ผ่าน proxy ถ้าใช้ judge ตัวอื่นต้องระบุใน writeup
 
-**Log:** ทุก `log` frame เป็น JSON หนึ่งบรรทัด `{"t":…, "phase":…, "kind":"transition|tool|llm|check|world", …}` อ่านได้จาก `runs/<run>/attempt1/jobs/<task>/agent/` แล้วรวมเป็น CSV และกราฟสำหรับ writeup
+**Log:** ทุก `log` frame เป็น JSON หนึ่งบรรทัด `{"t":…, "phase":…, "kind":…, …}`
+- `t` คือวินาทีนับจากได้รับ task ส่วน loop เดียว (A1–A3) ใช้ phase ชื่อ `LOOP`
+- `kind` มี `start` (level, model), `probe`, `transition` (event, to, reason, effects), `tool`, `llm` (token ของแต่ละ call), `check`, `context`, `model_tests`, `rollback`, `verify_changed`
+- kit เก็บไว้ที่ `runs/<run>/attempt<N>/jobs/dev/<task>__<id>/agent/` ทั้งใน `serve.log` (ครบทุกบรรทัด) และ `<name>.txt` (ตัดตรงกลางถ้ายาว)
+- `python3 tools/logs_to_csv.py runs/<run> -o csv/` รวมเป็น `events.csv`, `phases.csv` (เวลา, จำนวน call และ token ต่อ phase สำหรับ Figure 2) และ `tasks.csv` (คะแนนจาก `results.json`, ลำดับ phase, reason สุดท้าย, จำนวนรอบ FIX และ rollback)
 
 **ป้ายสาเหตุที่พลาด (Figure 3):**
 
@@ -236,15 +248,16 @@ evaluator ─ws─► volund (serve container: 2 CPU / 4 GB)
 | STOPPED_EARLY | จบก่อนงานครบ |
 | TIMEOUT_CRASH | harness ล่มหรือหมดเวลา |
 
-**Ablation** (ทุกข้อรันกับงานชุดเดียวกัน)
+**Ablation** (ทุกข้อรันกับงานชุดเดียวกัน) เลือกด้วย `VOLUND_ABLATION=A1`…`A6` ใน `env:` ของ `submission.yaml` ถ้าไม่ตั้งจะได้ A6 ซึ่งคือตัวที่ส่ง ถ้าตั้งค่าอื่นทุก task จะจบด้วย `error` เพื่อไม่ให้รันผิดการทดลองโดยไม่รู้ตัว
 - A0: sample `custom-openai` (baseline)
 - A1: Völund แบบ loop เดียว (ให้ได้เท่า A0)
-- A2: + PROBE
-- A3: + World และการ render ใหม่จาก World
-- A4: + FSM และด่านก่อนจบ
+- A2: + PROBE (เปิดบทสนทนาด้วยรายชื่อไฟล์และเครื่องมือใน container)
+- A3: + World และการ render ใหม่จาก World (tool `world_*`, ย่อ context ด้วยการ render จาก World, โดน cancel ส่งสรุปจาก World)
+- A4: + FSM และด่านก่อนจบ (PROBE → INTAKE → WRITE → CHECK ↺ FIX → FINALIZE, FIX ไม่มี snapshot)
 - A5: + MODEL/SOLVE (executable model)
 - A6: + VERIFY และ Δ≥0 commit
-- A7: + `view_page`
+- A7: + `view_page` (ยังไม่ได้ทำ)
+- ใน A4 และ A5 เวลาของ phase ที่ไม่ได้รันยกให้ WRITE งบรวมของทุก phase จึงเท่ากับ A6
 - Scaling: effort low/medium/high × `max_fix_rounds` 0–3 × best-of-N
 - โมเดล: ตัวที่จะส่ง + อย่างน้อยอีก 1 ตระกูล
 
@@ -279,11 +292,24 @@ evaluator ─ws─► volund (serve container: 2 CPU / 4 GB)
   - VERIFY เริ่ม context ใหม่
   - FIX มี snapshot และ rollback
   - กลับเข้า phase เดิมได้ไม่เกิน 3 ครั้ง
-- loop เดียวยังเลือกใช้ได้ด้วย `VOLUND_AGENT=loop` (A1)
+- loop เดียวยังเลือกใช้ได้ด้วย `VOLUND_AGENT=loop` (A1) ซึ่งตอนเย็นเปลี่ยนเป็น `VOLUND_ABLATION=A1`
 - `kit check --cancel-test` กับ driver ผ่านทุกขั้น รวม `mcp`: build 181 วินาที, smoke ใช้ 4 request, mcp ใช้ 7 request
 - เทสต์ 82 ข้อ
 
 ส่วนที่เหลือของ M2 คือการรันเต็มชุดบน VM และการติดป้ายสาเหตุที่พลาด ซึ่งต้องใช้โมเดลจริง
+
+**สถานะ 16 พ.ย. (เย็น):** ทำงาน 3 ชิ้นที่ไม่ต้องใช้โมเดลเสร็จแล้ว
+
+- สวิตช์ ablation A1–A6 ผ่าน `VOLUND_ABLATION` (§9)
+  - FSM มี `Features` (model, verify, commit_gate)
+  - ถ้าปิด VERIFY ด่านก่อนจบจะอ่านหลัง CHECK
+  - รอบ FIX นับตอนเข้า FIX ไม่ได้นับจาก snapshot แล้ว
+- CHECK ตรวจไฟล์ทดค้าง และเทียบ hash ของงานส่งรอบ VERIFY (§4)
+- `tools/logs_to_csv.py` แปลง log เป็น CSV และ log บอก token ของแต่ละ call พร้อม phase
+- เทสต์ Rust 98 ข้อ และเทสต์ Python ของ script 4 ข้อ
+- ทดสอบคำสั่ง shell กับ bash จริงใน container Debian amd64 แล้ว
+  - ไฟล์ทดชื่อมีช่องว่างและ `'` ถูกจับได้ แล้ว FIX ย้ายออก
+  - VERIFY ลบไฟล์และแก้ไฟล์ในโฟลเดอร์งานส่ง แล้ว harness คืนให้ครบ
 
 ## 11. สิ่งที่ยังไม่รู้ (ต้องวัดใน M0–M1)
 

@@ -1,6 +1,10 @@
-//! M1's agent: one tool-calling loop (ablation A1, meant to match the organisers' `custom-openai`
-//! sample, A0). The phase driver of DESIGN.md §4 replaces it in M2.
+//! The single tool-calling loop, for the lower rungs of the ablation ladder (DESIGN.md §9); the
+//! phase driver of DESIGN.md §4 works the task from A4 up.
 //!
+//! - A1 is meant to match the organisers' `custom-openai` sample (A0).
+//! - A2 opens the conversation with what PROBE found: the input files and the container's tools.
+//! - A3 also keeps the world: the model records the task with the `world_*` tools, the record is
+//!   re-rendered when old turns are dropped, and a cancel sends the summary built from it.
 //! - Keeps time for the final summary: three minutes, or a quarter of a short task's time. Once in
 //!   that window it stops working and asks for the summary without tools.
 //! - Tracks the best summary so far on the [`Link`], so a cancel still sends one.
@@ -15,7 +19,10 @@ use tokio::time::Instant;
 use volund_llm::{Call, Client, Error, Reply, ToolChoice, visible};
 
 use volund_mcp::Catalog;
+use volund_world::World;
 
+use crate::ablation::Level;
+use crate::driver::{probe, world_tools};
 use crate::link::Link;
 use crate::{mcp, tools};
 
@@ -29,7 +36,7 @@ const MAX_NUDGES: u32 = 2;
 
 const SYSTEM: &str = "You are an expert engineer completing a task inside a Linux container. Your tools \
 act in that container: bash (each call is a new shell that starts in {workdir}), read_file, write_file \
-and edit_file. The container has no internet access.
+and edit_file. The container has no internet access.{record}
 
 How to work:
 - Read the whole task first, then look at the files you were given before choosing an approach.
@@ -47,25 +54,44 @@ first version early, then improve it.
 When the work is done, answer without calling a tool: a short summary of what you delivered (the path \
 of each file) and the key results. That answer is graded together with your files.";
 
+/// A3: the world in the system prompt (A1 and A2 leave `{record}` empty).
+const RECORD: &str = "
+
+Keep a record of the task with the world_* tools: each deliverable (its exact path and what it must \
+contain), the input values you rely on with their sources, the requirements with their computed values \
+and verdicts, the actions to take in the task's applications, and your assumptions. When old turns are \
+dropped to save room, the record is what survives.";
+
 pub struct Agent {
     link: Arc<Link>,
     llm: Arc<Client>,
+    level: Level,
+    world: World,
     tools: Vec<Value>,
     catalog: Catalog,
     messages: Vec<Value>,
+    /// Messages kept when old turns are dropped: the system prompt, the task, PROBE's findings.
+    kept: usize,
     prompt_tokens: u64,
     compact_at: u64,
     finish_margin: Duration,
 }
 
 impl Agent {
-    pub fn new(link: Arc<Link>, llm: Arc<Client>, compact_at: u64) -> Self {
+    /// A loop for `level` (A1 to A3).
+    pub fn new(link: Arc<Link>, llm: Arc<Client>, compact_at: u64, level: Level) -> Self {
         Self {
+            world: World {
+                workdir: link.task.workdir.clone(),
+                ..World::default()
+            },
             link,
             llm,
+            level,
             tools: tools::definitions(),
             catalog: Catalog::new(Vec::new(), tools::NAMES),
             messages: Vec::new(),
+            kept: 2,
             prompt_tokens: 0,
             compact_at,
             finish_margin: FINISH_MARGIN,
@@ -80,12 +106,33 @@ impl Agent {
             || "unlimited".to_owned(),
             |l| (l.as_secs() / 60).to_string(),
         );
-        let (catalog, missing) = mcp::connect_all(&self.link, tools::NAMES).await;
+        self.event(
+            "start",
+            json!({
+                "level": self.level.name(),
+                "model": self.llm.model(),
+                "workdir": self.link.task.workdir,
+                "timeout_sec": left.map(|d| d.as_secs()),
+                "mcp_servers": self.link.task.mcp_servers.len(),
+            }),
+        );
+        if self.level.probe() {
+            let summary = probe::run(&self.link, &mut self.world).await;
+            self.event("probe", json!({"summary": summary}));
+        }
+        let mut reserved = tools::NAMES.to_vec();
+        if self.level.world() {
+            reserved.extend(world_tools::ALL);
+            self.tools
+                .extend(world_tools::definitions(world_tools::ALL));
+        }
+        let (catalog, missing) = mcp::connect_all(&self.link, &reserved).await;
         self.catalog = catalog;
         self.tools.extend(self.catalog.functions());
         let mut system = SYSTEM
             .replace("{workdir}", &self.link.task.workdir)
-            .replace("{minutes}", &minutes);
+            .replace("{minutes}", &minutes)
+            .replace("{record}", if self.level.world() { RECORD } else { "" });
         system.push_str(&self.catalog.prompt());
         if !missing.is_empty() {
             system.push_str(&format!(
@@ -97,14 +144,11 @@ impl Agent {
             json!({"role": "system", "content": system}),
             json!({"role": "user", "content": self.link.task.instruction}),
         ];
-        self.link.log(format!(
-            "task {}: workdir {}, model {}, {} MCP server(s), {} s",
-            self.link.task.session,
-            self.link.task.workdir,
-            self.llm.model(),
-            self.link.task.mcp_servers.len(),
-            left.map_or_else(|| "untimed".into(), |l| l.as_secs().to_string()),
-        ));
+        if self.level.probe() {
+            self.messages
+                .push(json!({"role": "user", "content": self.findings()}));
+        }
+        self.kept = self.messages.len();
 
         // `head`: the text of an answer cut off at the output limit, continued in the next turn
         let (mut nudges, mut head) = (0, String::new());
@@ -128,7 +172,7 @@ impl Agent {
                     return Ok(self.finish("Time is almost up.").await);
                 }
                 Err(Error::ContextFull(why)) => {
-                    if self.trim_read_results(true) {
+                    if self.shrink(true) {
                         continue;
                     }
                     return Err(format!("the conversation no longer fits the model: {why}"));
@@ -179,12 +223,22 @@ impl Agent {
                             .chars()
                             .take(400)
                             .collect();
-                        self.link.log(format!("{} {shown}", call.name));
-                        match mcp::run(&self.link, &self.catalog, &call.name, &args).await {
-                            Some(result) => tools::clip(&result, tools::RESULT_CHARS),
-                            None => {
-                                tools::run(&self.link, &call.name, &args, self.exec_cap()).await
-                            }
+                        self.event("tool", json!({"name": call.name, "args": shown}));
+                        let recorded = if self.level.world() {
+                            world_tools::apply(&mut self.world, &call.name, &args)
+                        } else {
+                            None
+                        };
+                        match recorded {
+                            Some(result) => result,
+                            None => match mcp::run(&self.link, &self.catalog, &call.name, &args)
+                                .await
+                            {
+                                Some(result) => tools::clip(&result, tools::RESULT_CHARS),
+                                None => {
+                                    tools::run(&self.link, &call.name, &args, self.exec_cap()).await
+                                }
+                            },
                         }
                     }
                     // arguments cut off at the output limit are the usual cause
@@ -202,10 +256,71 @@ impl Agent {
             {
                 content.push_str(&format!("\n[{} minutes left]", left.as_secs() / 60));
             }
+            if self.level.world() && !self.world.deliverables.is_empty() {
+                // a cancel now sends what the record holds rather than the model's last remark
+                self.link.set_final_message(&self.world.report());
+            }
             if self.prompt_tokens > self.compact_at {
-                self.trim_read_results(false);
+                self.shrink(false);
             }
         }
+    }
+
+    /// PROBE's findings, as the message after the task: with the world (A3), the record they start.
+    fn findings(&self) -> String {
+        let mut out = if self.level.world() {
+            format!(
+                "The record so far (the world_* tools add to it):\n{}",
+                self.world.brief()
+            )
+        } else if self.world.environment.is_empty() {
+            // the probe did not run, so it says nothing about the files either
+            return "Before you started, the harness tried to look around the container, but the \
+                    probe did not run.\n"
+                .to_owned();
+        } else {
+            format!(
+                "Before you started, the harness looked around the container.\nContainer: {}\n",
+                self.world.environment.join("; ")
+            )
+        };
+        if self.world.files.is_empty() {
+            out.push_str("\nNo input files were found outside hidden folders.\n");
+        } else {
+            out.push('\n');
+            out.push_str(&probe::input_files(&self.world));
+        }
+        out
+    }
+
+    /// Makes the conversation smaller: trims tool output the model has read (all of it when `all`),
+    /// and with the world (A3), drops the turns after the opening and re-renders the record when
+    /// trimming is not enough. Returns whether anything changed.
+    fn shrink(&mut self, all: bool) -> bool {
+        let trimmed = self.trim_read_results(all);
+        if !self.level.world() || (trimmed && !all && self.prompt_tokens <= self.compact_at) {
+            return trimmed;
+        }
+        if self.messages.len() <= self.kept + 1 {
+            return trimmed;
+        }
+        self.messages.truncate(self.kept);
+        self.messages.push(json!({"role": "user", "content": format!(
+            "Earlier turns were dropped to save room. The record so far:\n{}\nContinue the task from \
+             there; when it is done, answer with your summary of the deliverables.",
+            self.world.brief()
+        )}));
+        self.prompt_tokens = estimate_tokens(&self.messages);
+        self.event(
+            "context",
+            json!({"reopened": true, "tokens": self.prompt_tokens}),
+        );
+        true
+    }
+
+    /// One JSON line of the run's log; the loop is one phase, `LOOP`.
+    fn event(&self, kind: &str, data: Value) {
+        self.link.event("LOOP", kind, data);
     }
 
     /// Asks for the final summary without tools, keeping a little time in hand.
@@ -225,7 +340,7 @@ impl Agent {
             Ok(reply) => visible(&reply.text),
             Err(Error::CutOff { partial }) => visible(&partial),
             Err(e) => {
-                self.link.log(format!("the final summary call failed: {e}"));
+                self.event("llm", json!({"error": e.to_string()}));
                 String::new()
             }
         };
@@ -259,8 +374,19 @@ impl Agent {
             Some(usage) => {
                 self.prompt_tokens = usage.input_tokens;
                 self.link.usage(self.llm.model(), usage);
+                self.event(
+                    "llm",
+                    json!({
+                        "input_tokens": usage.input_tokens,
+                        "output_tokens": usage.output_tokens,
+                        "cache_read_tokens": usage.cache_read_tokens,
+                    }),
+                );
             }
-            None => self.prompt_tokens = estimate_tokens(&self.messages),
+            None => {
+                self.prompt_tokens = estimate_tokens(&self.messages);
+                self.event("llm", json!({"usage": null}));
+            }
         }
         Ok(reply)
     }
@@ -314,10 +440,10 @@ impl Agent {
         }
         if changed {
             self.prompt_tokens = estimate_tokens(&self.messages);
-            self.link.log(format!(
-                "trimmed older tool output; prompt now about {} tokens",
-                self.prompt_tokens
-            ));
+            self.event(
+                "context",
+                json!({"trimmed": true, "tokens": self.prompt_tokens}),
+            );
         }
         changed
     }

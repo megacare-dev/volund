@@ -7,13 +7,16 @@
 //!   the phase is in; cancel or the wrap-up time sends it to FINALIZE.
 //! - Before a FIX the deliverables are copied to /tmp/volund/snapshot and the world cloned; if the
 //!   fix lowers [`World::quality`], both are restored (the Δ≥0 commit gate).
+//! - VERIFY must not change the deliverables: they are hashed and copied before it, hashed again
+//!   after it, and restored if it changed them.
+//! - The ablation level ([`Level`]) can switch off MODEL/SOLVE, VERIFY and the commit gate.
 //! - The best summary so far, built from the world, is kept on the link after every phase, so a
 //!   cancel always has something to send.
 
 mod check;
-mod probe;
+pub(crate) mod probe;
 mod prompts;
-mod world_tools;
+pub(crate) mod world_tools;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -21,12 +24,13 @@ use std::time::Duration;
 
 use serde_json::{Map, Value, json};
 use tokio::time::Instant;
-use volund_fsm::{Effect, Event, Phase, Progress, next};
+use volund_fsm::{Effect, Event, Features, Phase, Progress, next};
 use volund_llm::{Call, Client, Error, Reply, ToolChoice, visible};
 use volund_mcp::Catalog;
 use volund_proto::Outgoing;
 use volund_world::World;
 
+use crate::ablation::Level;
 use crate::link::Link;
 use crate::{mcp, tools};
 
@@ -46,24 +50,31 @@ const MAX_NUDGES: u32 = 2;
 const MAX_REENTRIES: u32 = 3;
 const KEEP_RECENT_RESULTS: usize = 12;
 const TRIMMED_KEEP_CHARS: usize = 600;
-const FILES_SHOWN: usize = 150;
 const SNAPSHOT_DIR: &str = "/tmp/volund/snapshot";
+/// Where the deliverables are copied before VERIFY, to restore them if it changes them.
+const BEFORE_VERIFY_DIR: &str = "/tmp/volund/before-verify";
 const MODEL_TESTS: &str =
     "cd /tmp/volund/model 2>/dev/null && timeout 300 python3 tests.py 2>&1 | tail -n 40";
 
-/// The phase's share of the task's time. FIX's share covers all its rounds.
-fn share(phase: Phase, needs_model: bool) -> f64 {
+/// The phase's share of the task's time. FIX's share covers all its rounds. WRITE takes the time
+/// of the phases that do not run: MODEL and SOLVE (`models` false) and VERIFY (`verifies` false).
+fn share(phase: Phase, models: bool, verifies: bool) -> f64 {
     match phase {
         Phase::Intake => 0.10,
         Phase::Model => 0.20,
         Phase::Solve => 0.15,
-        // a task with nothing to model writes with MODEL's and SOLVE's time too
-        Phase::Write if needs_model => 0.20,
-        Phase::Write => 0.55,
+        Phase::Write => 0.20 + if models { 0.0 } else { 0.35 } + if verifies { 0.0 } else { 0.10 },
         Phase::Verify => 0.10,
         Phase::Fix => 0.15,
         _ => 0.0,
     }
+}
+
+/// What VERIFY found the deliverables to be, to tell whether it changed them.
+struct BeforeVerify {
+    hashes: check::Hashes,
+    /// The deliverables were copied to [`BEFORE_VERIFY_DIR`].
+    copied: bool,
 }
 
 struct Snapshot {
@@ -77,6 +88,8 @@ pub struct Driver {
     link: Arc<Link>,
     llm: Arc<Client>,
     compact_at: u64,
+    level: Level,
+    features: Features,
     world: World,
     catalog: Catalog,
     system: String,
@@ -89,7 +102,6 @@ pub struct Driver {
     fix_rounds: u32,
     snapshot: Option<Snapshot>,
     prompt_tokens: u64,
-    started: Instant,
     /// Why the run is in the current phase, shown in its opening message.
     reason: &'static str,
     test_output: String,
@@ -98,9 +110,12 @@ pub struct Driver {
 }
 
 impl Driver {
-    pub fn new(link: Arc<Link>, llm: Arc<Client>, compact_at: u64) -> Self {
+    /// A driver for `level` (A4 or above; lower levels run the single loop).
+    pub fn new(link: Arc<Link>, llm: Arc<Client>, compact_at: u64, level: Level) -> Self {
         let total = link.time_left().unwrap_or(NOMINAL_TOTAL);
         Self {
+            level,
+            features: level.features(),
             catalog: Catalog::new(Vec::new(), tools::NAMES),
             world: World {
                 workdir: link.task.workdir.clone(),
@@ -118,7 +133,6 @@ impl Driver {
             fix_rounds: 0,
             snapshot: None,
             prompt_tokens: 0,
-            started: Instant::now(),
             reason: "the run started",
             test_output: String::new(),
             model_failed: None,
@@ -127,6 +141,17 @@ impl Driver {
 
     /// Runs the phases until FINALIZE, and returns the final message.
     pub async fn run(mut self) -> Result<String, String> {
+        self.log(
+            Phase::Probe,
+            "start",
+            json!({
+                "level": self.level.name(),
+                "model": self.llm.model(),
+                "workdir": self.link.task.workdir,
+                "timeout_sec": self.link.time_left().map(|d| d.as_secs()),
+                "mcp_servers": self.link.task.mcp_servers.len(),
+            }),
+        );
         let mut phase = Phase::Probe;
         for _ in 0..MAX_TRANSITIONS {
             if matches!(phase, Phase::Finalize | Phase::Done) {
@@ -156,6 +181,9 @@ impl Driver {
                 "transition",
                 json!({"event": event, "to": prompts::name(t.to), "reason": t.reason, "effects": t.effects}),
             );
+            if t.to == Phase::Fix {
+                self.fix_rounds += 1;
+            }
             for effect in &t.effects {
                 self.apply(*effect).await;
             }
@@ -177,6 +205,7 @@ impl Driver {
             fix_rounds: self.fix_rounds,
             max_fix_rounds: MAX_FIX_ROUNDS,
             quality_at_snapshot: self.snapshot.as_ref().map(|s| s.quality),
+            features: self.features,
         }
     }
 
@@ -250,8 +279,55 @@ impl Driver {
             json!({"role": "user", "content": self.opening(Phase::Verify, deadline)}),
         ];
         let tools = self.tools_for(Phase::Verify);
-        self.converse(Phase::Verify, &mut messages, &tools, deadline)
-            .await
+        let before = self.before_verify().await;
+        let event = self
+            .converse(Phase::Verify, &mut messages, &tools, deadline)
+            .await;
+        if !self.link.is_cancelled() {
+            self.after_verify(before).await;
+        }
+        event
+    }
+
+    async fn before_verify(&mut self) -> Option<BeforeVerify> {
+        let hashes = check::hashes(&self.link, &self.world).await?;
+        let copied = self.copy_deliverables(BEFORE_VERIFY_DIR).await;
+        Some(BeforeVerify { hashes, copied })
+    }
+
+    /// Restores the deliverables if VERIFY changed them, and checks again for stray files (VERIFY
+    /// works in /tmp/volund/verify). Either result can stop the run from finishing.
+    async fn after_verify(&mut self, before: Option<BeforeVerify>) {
+        if let Some(before) = before
+            && let Some(after) = check::hashes(&self.link, &self.world).await
+        {
+            let changed = check::changed(&before.hashes, &after);
+            if !changed.is_empty() {
+                let mut restored = false;
+                if before.copied
+                    && self
+                        .exec_ok(&format!("cp -a '{BEFORE_VERIFY_DIR}'/. / && echo restored"))
+                        .await
+                {
+                    restored = check::hashes(&self.link, &self.world)
+                        .await
+                        .is_some_and(|now| check::changed(&before.hashes, &now).is_empty());
+                }
+                self.log(
+                    Phase::Verify,
+                    "verify_changed",
+                    json!({"changed": changed, "restored": restored}),
+                );
+                check::record(
+                    &mut self.world,
+                    check::unchanged_by_verify(&changed, restored),
+                );
+            }
+        }
+        if let Some(stray) = check::stray_files(&self.link, &self.world).await {
+            check::record(&mut self.world, stray);
+        }
+        self.log(Phase::Verify, "check", json!({"checks": self.world.checks}));
     }
 
     /// The model works until it answers in words (the phase is done), the phase's time is spent, or
@@ -276,7 +352,7 @@ impl Driver {
                 return Event::BudgetSpent;
             }
             let mut reply = match self
-                .complete(messages, tools, ToolChoice::Auto, Some(deadline))
+                .complete(phase, messages, tools, ToolChoice::Auto, Some(deadline))
                 .await
             {
                 Ok(reply) => reply,
@@ -363,6 +439,7 @@ impl Driver {
 
     async fn complete(
         &mut self,
+        phase: Phase,
         messages: &[Value],
         tools: &[Value],
         tool_choice: ToolChoice,
@@ -381,8 +458,20 @@ impl Driver {
             Some(usage) => {
                 self.prompt_tokens = usage.input_tokens;
                 self.link.usage(self.llm.model(), usage);
+                self.log(
+                    phase,
+                    "llm",
+                    json!({
+                        "input_tokens": usage.input_tokens,
+                        "output_tokens": usage.output_tokens,
+                        "cache_read_tokens": usage.cache_read_tokens,
+                    }),
+                );
             }
-            None => self.prompt_tokens = estimate_tokens(messages),
+            None => {
+                self.prompt_tokens = estimate_tokens(messages);
+                self.log(phase, "llm", json!({"usage": null}));
+            }
         }
         Ok(reply)
     }
@@ -444,7 +533,10 @@ impl Driver {
     /// When the phase must end: its share of the task's time (less what it already used), and never
     /// past the time kept for FINALIZE.
     fn phase_deadline(&self, phase: Phase) -> Instant {
-        let budget = self.total.mul_f64(share(phase, self.world.needs_model()));
+        let models = self.world.needs_model() && self.features.model;
+        let budget = self
+            .total
+            .mul_f64(share(phase, models, self.features.verify));
         let left = budget.saturating_sub(self.spent.get(&phase).copied().unwrap_or_default());
         let mut deadline = Instant::now() + left;
         if let Some(end) = self
@@ -481,16 +573,8 @@ impl Driver {
         out.push_str("\nThe record so far:\n");
         out.push_str(&self.world.brief());
         if phase == Phase::Intake && !self.world.files.is_empty() {
-            out.push_str("\nInput files:\n");
-            for f in self.world.files.iter().take(FILES_SHOWN) {
-                out.push_str(&format!("- {} ({} bytes)\n", f.path, f.bytes));
-            }
-            if self.world.files.len() > FILES_SHOWN {
-                out.push_str(&format!(
-                    "- ... and {} more\n",
-                    self.world.files.len() - FILES_SHOWN
-                ));
-            }
+            out.push('\n');
+            out.push_str(&probe::input_files(&self.world));
         }
         if phase == Phase::Model && !self.test_output.is_empty() {
             out.push_str(&format!("\nLast run of tests.py:\n{}\n", self.test_output));
@@ -544,8 +628,8 @@ impl Driver {
     async fn apply(&mut self, effect: Effect) {
         match effect {
             Effect::Snapshot => {
-                self.fix_rounds += 1;
-                let dir = self.copy_deliverables().await;
+                let dir = format!("{SNAPSHOT_DIR}/{}", self.fix_rounds);
+                let dir = self.copy_deliverables(&dir).await.then_some(dir);
                 self.snapshot = Some(Snapshot {
                     world: self.world.clone(),
                     quality: self.world.quality(),
@@ -571,9 +655,9 @@ impl Driver {
         }
     }
 
-    /// Copies the deliverables (with their full paths) under the snapshot directory.
-    async fn copy_deliverables(&self) -> Option<String> {
-        let dir = format!("{SNAPSHOT_DIR}/{}", self.fix_rounds);
+    /// Copies the deliverables (with their full paths) under `dir`; true when every one that exists
+    /// was copied.
+    async fn copy_deliverables(&self, dir: &str) -> bool {
         let paths: Vec<String> = self
             .world
             .deliverables
@@ -599,7 +683,7 @@ impl Driver {
                 paths.join(" ")
             }
         );
-        self.exec_ok(&command).await.then_some(dir)
+        self.exec_ok(&command).await
     }
 
     /// Runs a scripted command; true when it printed its last word as the final line.
@@ -652,6 +736,7 @@ impl Driver {
         let tools = self.tools_for(Phase::Write);
         let text = match self
             .complete(
+                Phase::Finalize,
                 &messages,
                 &tools,
                 ToolChoice::None,
@@ -672,11 +757,7 @@ impl Driver {
 
     /// One JSON line per event in the run's log (DESIGN.md §9).
     fn log(&self, phase: Phase, kind: &str, data: Value) {
-        let mut line = json!({"t": self.started.elapsed().as_secs(), "phase": prompts::name(phase), "kind": kind});
-        if let (Value::Object(l), Value::Object(d)) = (&mut line, data) {
-            l.extend(d);
-        }
-        self.link.log(line.to_string());
+        self.link.event(prompts::name(phase), kind, data);
     }
 }
 
@@ -736,23 +817,20 @@ mod tests {
     }
 
     #[test]
-    fn writing_tasks_get_the_modelling_time() {
-        let with: f64 = [
-            Phase::Intake,
-            Phase::Model,
-            Phase::Solve,
-            Phase::Write,
-            Phase::Verify,
-            Phase::Fix,
-        ]
-        .iter()
-        .map(|&p| share(p, true))
-        .sum();
-        let without: f64 = [Phase::Intake, Phase::Write, Phase::Verify, Phase::Fix]
-            .iter()
-            .map(|&p| share(p, false))
-            .sum();
-        assert!((with - 0.9).abs() < 1e-9 && (without - 0.9).abs() < 1e-9);
+    fn write_gets_the_time_of_the_phases_that_do_not_run() {
+        for models in [true, false] {
+            for verifies in [true, false] {
+                let mut phases = vec![Phase::Intake, Phase::Write, Phase::Fix];
+                if models {
+                    phases.extend([Phase::Model, Phase::Solve]);
+                }
+                if verifies {
+                    phases.push(Phase::Verify);
+                }
+                let total: f64 = phases.iter().map(|&p| share(p, models, verifies)).sum();
+                assert!((total - 0.9).abs() < 1e-9, "{models} {verifies}: {total}");
+            }
+        }
     }
 
     #[test]

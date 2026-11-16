@@ -207,7 +207,10 @@
             <li><code>kit check --cancel-test</code> ผ่านทุกขั้น โดยใช้ mock model แทนโมเดลจริง build ใช้เวลา 173 วินาที</li>
             <li>MCP client <span class="chip done">M2</span> คุยกับแอปของโจทย์ผ่านคำขอ <code>http</code> ได้แล้ว งาน MCP ของ kit รันผ่านในเทสต์</li>
             <li>driver <span class="chip done">M2</span> ให้ State Machine เลือก phase และให้โมเดลบันทึกลง World ผ่าน tool <code>world_*</code> ส่วน CHECK ตรวจไฟล์ด้วยโค้ด, FIX มี snapshot และ rollback, ถ้าโดน cancel จะสรุปจาก World</li>
-            <li>เทสต์ 81 ข้อผ่านหมด รวมเทสต์ที่รันทั้ง task ผ่าน WebSocket จริงทั้งแบบ driver และแบบ loop เดียว</li>
+            <li>สวิตช์ ablation A1–A6 <span class="chip done">ใหม่</span> เลือกด้วย <code>VOLUND_ABLATION</code></li>
+            <li>CHECK <span class="chip done">ใหม่</span> จับไฟล์ทดค้างในโฟลเดอร์ที่ถูกตรวจ และคืนงานส่งที่ VERIFY แก้ ทดสอบกับ bash จริงใน container Linux แล้ว</li>
+            <li>script แปลง log เป็น CSV <span class="chip done">ใหม่</span> ได้เวลา, จำนวน call และ token แยกตาม phase พร้อมคะแนนต่อ task</li>
+            <li>เทสต์ 98 ข้อผ่านหมด รวมเทสต์ที่รันทั้ง task ผ่าน WebSocket จริงทั้งแบบ driver และแบบ loop เดียว</li>
           </ul>
         </div>
         <div class="card status" style="border-left-color: var(--wait)">
@@ -371,8 +374,8 @@
           <li><b>INTAKE</b> <span class="chip llm">LLM</span> โมเดลอ่านโจทย์กับไฟล์ แล้วบันทึกลง World ว่าต้องส่งอะไร ที่ไหน ใช้ค่าอะไรจากไหน และมี constraint อะไรบ้าง</li>
           <li><b>MODEL → SOLVE</b> <span class="chip llm">LLM</span> เขียนโมเดลคำนวณพร้อมเทสต์ไว้ใน <code>/tmp/volund/model/</code> harness เป็นคนรันเทสต์เอง จากนั้นหาคำตอบที่ผ่าน hard constraint ก่อน แล้วค่อย optimize</li>
           <li><b>WRITE</b> <span class="chip llm">LLM</span> เขียนโครงไฟล์งานส่งตั้งแต่ต้นแล้วค่อยเติมให้ครบ ทำ action ในแอปจริง (ส่งอีเมล ปิดเคส) แล้วอ่านกลับเพื่อยืนยัน</li>
-          <li><b>CHECK</b> <span class="chip code">โค้ด</span> ตรวจแบบไม่ใช้โมเดล: ไฟล์อยู่ครบและไม่ว่าง, เปิดได้ตาม format, ไม่มีไฟล์ทดค้างในโฟลเดอร์ที่ถูกตรวจ</li>
-          <li><b>VERIFY ↺ FIX</b> <span class="chip llm">LLM</span> ใช้ context ใหม่คำนวณซ้ำด้วยวิธีอื่นเพื่อหาช่องโหว่ ถ้าเจอก็แก้ แต่จะเก็บผลการแก้ไว้เฉพาะเมื่อคะแนนประมาณไม่ลดลง</li>
+          <li><b>CHECK</b> <span class="chip code">โค้ด</span> ตรวจแบบไม่ใช้โมเดล: ไฟล์อยู่ครบและไม่ว่าง, เปิดได้ตาม format, ไม่มีไฟล์ทดค้างในโฟลเดอร์ที่ถูกตรวจ (เทียบกับรายชื่อไฟล์ที่ PROBE เก็บไว้ตอนเริ่ม)</li>
+          <li><b>VERIFY ↺ FIX</b> <span class="chip llm">LLM</span> ใช้ context ใหม่คำนวณซ้ำด้วยวิธีอื่นเพื่อหาช่องโหว่ ถ้าเจอก็แก้ แต่จะเก็บผลการแก้ไว้เฉพาะเมื่อคะแนนประมาณไม่ลดลง VERIFY ห้ามแก้งานส่ง harness จึงเทียบ hash ก่อนกับหลัง ถ้าเปลี่ยนจะคืนไฟล์จากสำเนา</li>
           <li><b>FINALIZE</b> <span class="chip code">โค้ด</span> สร้าง <code>final_message</code> จาก World (ไฟล์และ path, ผลหลัก, code ที่ใช้, สมมติฐาน, ข้อจำกัด) แล้วส่ง <code>done</code></li>
         </ol>
         <p class="warn" style="margin-top:6px"><b>ทุกขั้น:</b> ถ้าได้ <code>cancel</code> หรือเวลาใกล้หมด ให้กระโดดไป FINALIZE ทันที ซึ่งสรุปจาก World ได้โดยไม่ต้องรอโมเดล เราจึงมี <code>done</code> ที่มีเนื้อหาเสมอ</p>
@@ -582,14 +585,15 @@
           <h3 style="margin-bottom:8px">Ablation: เพิ่มทีละชั้นแล้ววัด</h3>
           <ol class="ladder">
             <li><span class="id">A0</span><span>sample <code>custom-openai</code> ของผู้จัด (baseline)</span></li>
-            <li><span class="id">A1</span><span>Völund แบบ loop เดียว (<code>VOLUND_AGENT=loop</code>) ต้องได้เท่า A0 <span class="chip done">พร้อม</span></span></li>
-            <li><span class="id">A2</span><span>+ PROBE</span></li>
-            <li><span class="id">A3</span><span>+ World และการ render ใหม่จาก World</span></li>
-            <li><span class="id">A4</span><span>+ State Machine และด่านก่อนจบ</span></li>
-            <li><span class="id">A5</span><span>+ MODEL/SOLVE (โมเดลคำนวณที่รันได้)</span></li>
-            <li><span class="id">A6</span><span>+ VERIFY และการเก็บผลเมื่อคะแนนไม่ลด</span></li>
+            <li><span class="id">A1</span><span>Völund แบบ loop เดียว ต้องได้เท่า A0 <span class="chip done">พร้อม</span></span></li>
+            <li><span class="id">A2</span><span>+ PROBE (เริ่มด้วยรายชื่อไฟล์และเครื่องมือใน container) <span class="chip done">พร้อม</span></span></li>
+            <li><span class="id">A3</span><span>+ World และการ render ใหม่จาก World <span class="chip done">พร้อม</span></span></li>
+            <li><span class="id">A4</span><span>+ State Machine และด่านก่อนจบ <span class="chip done">พร้อม</span></span></li>
+            <li><span class="id">A5</span><span>+ MODEL/SOLVE (โมเดลคำนวณที่รันได้) <span class="chip done">พร้อม</span></span></li>
+            <li><span class="id">A6</span><span>+ VERIFY และการเก็บผลเมื่อคะแนนไม่ลด (ตัวที่ส่ง) <span class="chip done">พร้อม</span></span></li>
             <li><span class="id">A7</span><span>+ <code>view_page</code> (ดูแบบเป็นภาพ)</span></li>
           </ol>
+          <p class="sub" style="margin-top:8px">เลือกชั้นด้วย <code>VOLUND_ABLATION=A1</code> ถึง <code>A6</code> ถ้าไม่ตั้งจะได้ A6 ส่วน log ของทุกชั้นแปลงเป็น CSV ได้ด้วย <code>tools/logs_to_csv.py</code></p>
           <p class="sub" style="margin-top:8px">และ scaling: effort low/medium/high × จำนวนรอบแก้ 0–3 × best-of-N บนโมเดลที่จะส่งและอีกอย่างน้อย 1 ตระกูล</p>
         </div>
         <div>

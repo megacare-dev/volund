@@ -15,6 +15,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use volund_proto::{Incoming, MAX_FRAME_BYTES, Outgoing};
 
+use crate::ablation::Level;
 use crate::agent::Agent;
 use crate::driver::Driver;
 use crate::link::{Link, Out};
@@ -27,29 +28,13 @@ const FINAL_MESSAGE_CHARS: usize = 100_000;
 
 #[derive(Clone)]
 pub struct Settings {
-    /// `None` when the model variables are missing; each task then ends with an `error`.
+    /// `None` when the harness cannot work (the model variables are missing, or `VOLUND_ABLATION` is
+    /// not a level); each task then ends with an `error` that says why.
     pub llm: Option<Arc<volund_llm::Client>>,
     pub llm_problem: String,
     pub compact_at: u64,
-    pub agent: AgentKind,
-}
-
-/// Which agent works the task (`VOLUND_AGENT`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AgentKind {
-    /// The phase driver: world model and state machine (DESIGN.md §3–4).
-    Phases,
-    /// One tool-calling loop, the A1 ablation.
-    Loop,
-}
-
-impl AgentKind {
-    pub fn from_setting(value: Option<&str>) -> Self {
-        match value {
-            Some("loop") => Self::Loop,
-            _ => Self::Phases,
-        }
-    }
+    /// Which rung of the ablation ladder works the task (`VOLUND_ABLATION`).
+    pub level: Level,
 }
 
 /// Serves tasks until the listener fails.
@@ -107,10 +92,16 @@ async fn session(stream: TcpStream, settings: Settings) -> Result<(), String> {
         let settings = settings.clone();
         async move {
             match settings.llm {
-                Some(llm) => match settings.agent {
-                    AgentKind::Phases => Driver::new(link, llm, settings.compact_at).run().await,
-                    AgentKind::Loop => Agent::new(link, llm, settings.compact_at).run().await,
-                },
+                Some(llm) if settings.level.phases() => {
+                    Driver::new(link, llm, settings.compact_at, settings.level)
+                        .run()
+                        .await
+                }
+                Some(llm) => {
+                    Agent::new(link, llm, settings.compact_at, settings.level)
+                        .run()
+                        .await
+                }
                 None => Err(settings.llm_problem),
             }
         }

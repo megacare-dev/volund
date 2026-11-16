@@ -43,6 +43,7 @@ pub struct Link {
     slots: Semaphore,
     next_id: AtomicU64,
     cancelled: watch::Sender<bool>,
+    received: Instant,
     deadline: Option<Instant>,
     final_message: Mutex<String>,
 }
@@ -62,6 +63,7 @@ impl Link {
             slots: Semaphore::new(MAX_IN_FLIGHT),
             next_id: AtomicU64::new(1),
             cancelled: watch::channel(false).0,
+            received,
             deadline,
             final_message: Mutex::new(String::new()),
         }
@@ -150,6 +152,17 @@ impl Link {
         let text = text.into();
         eprintln!("volund: {text}");
         self.send(&Outgoing::Log { text });
+    }
+
+    /// One JSON line of the run's log (DESIGN.md §9): `t` (seconds since the task arrived), `phase`,
+    /// `kind`, then the fields of `data`. `tools/logs_to_csv.py` reads these lines.
+    pub fn event(&self, phase: &str, kind: &str, data: serde_json::Value) {
+        let t = (self.received.elapsed().as_millis() as f64) / 1000.0;
+        let mut line = serde_json::json!({"t": t, "phase": phase, "kind": kind});
+        if let (serde_json::Value::Object(l), serde_json::Value::Object(d)) = (&mut line, data) {
+            l.extend(d);
+        }
+        self.log(line.to_string());
     }
 
     pub fn usage(&self, model: &str, usage: &volund_llm::Usage) {

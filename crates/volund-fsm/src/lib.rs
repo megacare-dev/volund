@@ -56,6 +56,29 @@ pub enum Event {
     DoneSent,
 }
 
+/// The parts of the run that can be switched off, for the ablation ladder (DESIGN.md §9). All are on
+/// by default; with all off the run is PROBE → INTAKE → WRITE → CHECK ↺ FIX → FINALIZE, finishing
+/// through the finish gate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Features {
+    /// MODEL and SOLVE run when the world has constraints.
+    pub model: bool,
+    /// VERIFY runs once the checks pass; without it the finish gate is read straight after CHECK.
+    pub verify: bool,
+    /// Each FIX starts from a snapshot that is restored if the fix lowers quality (Δ≥0).
+    pub commit_gate: bool,
+}
+
+impl Default for Features {
+    fn default() -> Self {
+        Self {
+            model: true,
+            verify: true,
+            commit_gate: true,
+        }
+    }
+}
+
 /// What the driver tracks across phases.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 pub struct Progress {
@@ -63,11 +86,12 @@ pub struct Progress {
     pub time_left_sec: Option<u64>,
     /// Seconds kept for FINALIZE.
     pub wrap_up_sec: u64,
-    /// FIX rounds started so far.
+    /// FIX rounds started so far: the driver counts each transition into FIX.
     pub fix_rounds: u32,
     pub max_fix_rounds: u32,
     /// World quality when the pending FIX took its snapshot; `None` when no fix awaits its check.
     pub quality_at_snapshot: Option<f64>,
+    pub features: Features,
 }
 
 impl Progress {
@@ -85,8 +109,8 @@ impl Progress {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Effect {
-    /// Entering FIX: copy the deliverables aside, keep a clone of the world, record its quality,
-    /// and count the round.
+    /// Entering FIX with the commit gate on: copy the deliverables aside, keep a clone of the world
+    /// and record its quality.
     Snapshot,
     /// The fix kept or raised quality: drop the snapshot.
     Commit,
@@ -110,17 +134,22 @@ fn go(to: Phase, reason: &'static str) -> Transition {
     }
 }
 
-fn start_fix(reason: &'static str) -> Transition {
+fn start_fix(reason: &'static str, features: Features) -> Transition {
     Transition {
         to: Phase::Fix,
         reason,
-        effects: vec![Effect::Snapshot],
+        effects: if features.commit_gate {
+            vec![Effect::Snapshot]
+        } else {
+            Vec::new()
+        },
     }
 }
 
 /// The phase to run after `phase` ended with `event`.
 pub fn next(phase: Phase, event: Event, world: &World, progress: &Progress) -> Transition {
     use Phase::*;
+    let features = progress.features;
     match (phase, event) {
         (Done, _) => go(Done, "finished"),
         (Finalize, Event::DoneSent) => go(Done, "done sent"),
@@ -133,7 +162,8 @@ pub fn next(phase: Phase, event: Event, world: &World, progress: &Progress) -> T
         (Intake, Event::PhaseEnded) if !world.intake_complete() => {
             go(Intake, "deliverables not specified yet")
         }
-        (Intake, _) if world.needs_model() => go(Model, "constraints recorded"),
+        (Intake, _) if world.needs_model() && features.model => go(Model, "constraints recorded"),
+        (Intake, _) if world.needs_model() => go(Write, "constraints recorded; MODEL is off"),
         (Intake, _) => go(Write, "no constraints: nothing to model"),
 
         (Model, _) if world.model.green() => go(Solve, "model tests pass"),
@@ -145,15 +175,17 @@ pub fn next(phase: Phase, event: Event, world: &World, progress: &Progress) -> T
         (Check, _) => after_check(world, progress),
 
         (Verify, _) if world.finish_blockers().is_empty() => go(Finalize, "verified"),
-        (Verify, _) if progress.fix_round_left() => start_fix("verifier found gaps"),
+        (Verify, _) if progress.fix_round_left() => start_fix("verifier found gaps", features),
         (Verify, _) => go(Finalize, "gaps remain; no fix round left"),
 
         (Fix, _) => go(Check, "fix applied"),
     }
 }
 
-/// CHECK settles a pending fix first (the Δ≥0 commit gate), then routes on the checks.
+/// CHECK settles a pending fix first (the Δ≥0 commit gate), then routes on the checks; without
+/// VERIFY, passing checks finish through the finish gate.
 fn after_check(world: &World, progress: &Progress) -> Transition {
+    let features = progress.features;
     let mut effects = Vec::new();
     if let Some(before) = progress.quality_at_snapshot {
         if world.quality() < before {
@@ -165,11 +197,23 @@ fn after_check(world: &World, progress: &Progress) -> Transition {
         }
         effects.push(Effect::Commit);
     }
-    let (to, reason) = if world.checks_pass() {
+    let passing = world.checks_pass();
+    let (to, reason) = if passing && features.verify {
         (Phase::Verify, "checks pass")
+    } else if passing && world.finish_blockers().is_empty() {
+        (Phase::Finalize, "checks pass; nothing blocks finishing")
     } else if progress.fix_round_left() {
-        effects.push(Effect::Snapshot);
-        (Phase::Fix, "checks failing")
+        if features.commit_gate {
+            effects.push(Effect::Snapshot);
+        }
+        let why = if passing {
+            "checks pass; finish blockers remain"
+        } else {
+            "checks failing"
+        };
+        (Phase::Fix, why)
+    } else if passing {
+        (Phase::Finalize, "finish blockers remain; no fix round left")
     } else {
         (Phase::Finalize, "checks failing; no fix round left")
     };
@@ -194,7 +238,14 @@ mod tests {
             fix_rounds: 0,
             max_fix_rounds: 2,
             quality_at_snapshot: None,
+            features: Features::default(),
         }
+    }
+
+    fn without(f: impl Fn(&mut Features)) -> Progress {
+        let mut p = progress();
+        f(&mut p.features);
+        p
     }
 
     fn with_deliverable() -> World {
@@ -367,9 +418,67 @@ mod tests {
         );
     }
 
-    /// Plays the driver's part: applies effects and keeps spending budgets until the run is done.
-    fn run_to_done(world: &World, max_steps: usize) -> Option<usize> {
-        let mut p = progress();
+    #[test]
+    fn without_the_model_phases_constraints_go_straight_to_write() {
+        let world = with_constraint(Verdict::Unchecked);
+        let t = next(
+            Phase::Intake,
+            Event::PhaseEnded,
+            &world,
+            &without(|f| f.model = false),
+        );
+        assert_eq!(
+            (t.to, t.reason),
+            (Phase::Write, "constraints recorded; MODEL is off")
+        );
+    }
+
+    #[test]
+    fn without_verify_passing_checks_meet_the_finish_gate() {
+        let off = without(|f| f.verify = false);
+        let mut done = with_constraint(Verdict::Pass);
+        done.deliverables[0].status = DeliverableStatus::Checked;
+        checks(&mut done, true);
+        let t = next(Phase::Check, Event::PhaseEnded, &done, &off);
+        assert_eq!(
+            (t.to, t.reason),
+            (Phase::Finalize, "checks pass; nothing blocks finishing")
+        );
+
+        let mut open = with_constraint(Verdict::Unchecked);
+        open.deliverables[0].status = DeliverableStatus::Checked;
+        checks(&mut open, true);
+        let t = next(Phase::Check, Event::PhaseEnded, &open, &off);
+        assert_eq!(
+            (t.to, t.reason),
+            (Phase::Fix, "checks pass; finish blockers remain")
+        );
+        assert_eq!(t.effects, vec![Effect::Snapshot]);
+        let mut spent = off;
+        spent.fix_rounds = 2;
+        assert_eq!(
+            next(Phase::Check, Event::PhaseEnded, &open, &spent).reason,
+            "finish blockers remain; no fix round left"
+        );
+    }
+
+    #[test]
+    fn without_the_commit_gate_a_fix_takes_no_snapshot() {
+        let off = without(|f| f.commit_gate = false);
+        let mut failing = with_deliverable();
+        checks(&mut failing, false);
+        let t = next(Phase::Check, Event::PhaseEnded, &failing, &off);
+        assert_eq!((t.to, t.effects), (Phase::Fix, vec![]));
+
+        let mut gaps = with_constraint(Verdict::Fail);
+        checks(&mut gaps, true);
+        let t = next(Phase::Verify, Event::PhaseEnded, &gaps, &off);
+        assert_eq!((t.to, t.effects), (Phase::Fix, vec![]));
+    }
+
+    /// Plays the driver's part: applies effects, counts FIX rounds and keeps spending budgets until
+    /// the run is done.
+    fn run_to_done(world: &World, mut p: Progress, max_steps: usize) -> Option<usize> {
         let mut phase = Phase::Probe;
         for step in 0..max_steps {
             if phase == Phase::Done {
@@ -381,12 +490,12 @@ mod tests {
                 Event::BudgetSpent
             };
             let t = next(phase, event, world, &p);
+            if t.to == Phase::Fix {
+                p.fix_rounds += 1;
+            }
             for effect in &t.effects {
                 match effect {
-                    Effect::Snapshot => {
-                        p.fix_rounds += 1;
-                        p.quality_at_snapshot = Some(world.quality());
-                    }
+                    Effect::Snapshot => p.quality_at_snapshot = Some(world.quality()),
                     Effect::Commit | Effect::Rollback => p.quality_at_snapshot = None,
                 }
             }
@@ -399,8 +508,26 @@ mod tests {
     fn spent_budgets_always_end_the_run() {
         let mut failing = with_constraint(Verdict::Fail);
         checks(&mut failing, false);
-        for world in [World::default(), with_deliverable(), failing] {
-            assert!(run_to_done(&world, 40).is_some(), "stalled on {world:?}");
+        let mut blocked = with_constraint(Verdict::Unchecked);
+        checks(&mut blocked, true);
+        for bits in 0..8u8 {
+            let p = without(|f| {
+                f.model = bits & 1 == 0;
+                f.verify = bits & 2 == 0;
+                f.commit_gate = bits & 4 == 0;
+            });
+            for world in [
+                World::default(),
+                with_deliverable(),
+                failing.clone(),
+                blocked.clone(),
+            ] {
+                assert!(
+                    run_to_done(&world, p, 40).is_some(),
+                    "stalled on {world:?} with {:?}",
+                    p.features
+                );
+            }
         }
     }
 }
