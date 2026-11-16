@@ -1,0 +1,685 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Völund · แบบของ harness</title>
+<meta name="description" content="แบบของ Völund: agent harness ภาษา Rust สำหรับการแข่ง Physical-Engineering's Last Exam (PLE) ฉบับอธิบายทีม">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #faf8f4;
+    --surface: #ffffff;
+    --surface-2: #f3f0ea;
+    --ink: #1c232c;
+    --ink-2: #444d58;
+    --muted: #6b7380;
+    --line: #e4dfd6;
+    --ember: #c2410c;
+    --ember-soft: #fdeee4;
+    --ember-line: #f2c4a6;
+    --steel: #1f4e7a;
+    --steel-soft: #e8f0f8;
+    --steel-line: #b9cfe4;
+    --ok: #2f7a4f;
+    --ok-soft: #e6f3eb;
+    --wait: #9a6a10;
+    --wait-soft: #fbf1db;
+    --plan: #5b6573;
+    --plan-soft: #eef0f3;
+    --radius: 14px;
+    --shadow: 0 1px 2px rgba(28, 35, 44, .05), 0 4px 14px rgba(28, 35, 44, .05);
+    --sans: "IBM Plex Sans Thai", system-ui, sans-serif;
+    --display: "Outfit", "IBM Plex Sans Thai", system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.75 var(--sans);
+    -webkit-text-size-adjust: 100%;
+  }
+  a { color: var(--steel); text-underline-offset: 3px; }
+  code, .mono { font-family: var(--mono); font-size: .88em; }
+  code { background: var(--surface-2); padding: .08em .35em; border-radius: 5px; }
+  h1, h2, h3 { font-family: var(--display); line-height: 1.3; margin: 0; }
+  h2 { font-size: 1.6rem; letter-spacing: -.01em; }
+  h3 { font-size: 1.12rem; }
+  p { margin: .6em 0; }
+
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 16px; }
+  .layout { display: grid; grid-template-columns: 1fr; gap: 32px; }
+  @media (min-width: 1000px) { .layout { grid-template-columns: 220px 1fr; } }
+
+  /* header */
+  header.hero { background: linear-gradient(180deg, #fff 0%, var(--bg) 100%); border-bottom: 1px solid var(--line); }
+  .hero-inner { padding: 48px 0 36px; }
+  .eyebrow { font-family: var(--display); font-weight: 600; color: var(--ember); letter-spacing: .06em; text-transform: uppercase; font-size: .82rem; }
+  .hero h1 { font-size: clamp(2rem, 5vw, 3.1rem); margin: 6px 0 10px; letter-spacing: -.02em; }
+  .hero h1 span { color: var(--ember); }
+  .lede { font-size: 1.12rem; color: var(--ink-2); max-width: 760px; }
+  .facts { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+  .fact { background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; font-size: .92rem; }
+  .fact b { font-family: var(--display); }
+
+  /* toc */
+  nav.toc { display: none; }
+  @media (min-width: 1000px) {
+    nav.toc { display: block; position: sticky; top: 24px; align-self: start; padding-top: 36px; font-size: .92rem; }
+    nav.toc ol { list-style: none; margin: 0; padding: 0; border-left: 2px solid var(--line); }
+    nav.toc li a { display: block; padding: 5px 0 5px 14px; color: var(--ink-2); text-decoration: none; margin-left: -2px; border-left: 2px solid transparent; }
+    nav.toc li a:hover { color: var(--ember); border-left-color: var(--ember); }
+  }
+
+  main { min-width: 0; padding-bottom: 64px; }
+  section { padding-top: 40px; }
+  section > h2 { margin-bottom: 6px; }
+  .sub { color: var(--muted); margin: 0 0 18px; }
+
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 20px; box-shadow: var(--shadow); }
+  .grid { display: grid; gap: 14px; }
+  .g2 { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+  .g3 { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+  .g4 { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+
+  .stat .num { font-family: var(--display); font-weight: 700; font-size: 2rem; color: var(--ember); line-height: 1.1; }
+  .stat .lbl { color: var(--ink-2); font-size: .95rem; }
+
+  .status { border-left: 4px solid var(--ember); }
+  .status ul { margin: .4em 0 0; padding-left: 1.2em; }
+
+  .chip { display: inline-block; font-size: .78rem; font-weight: 600; padding: 2px 10px; border-radius: 999px; white-space: nowrap; font-family: var(--sans); }
+  .chip.done { background: var(--ok-soft); color: var(--ok); }
+  .chip.now { background: var(--ember-soft); color: var(--ember); }
+  .chip.wait { background: var(--wait-soft); color: var(--wait); }
+  .chip.plan { background: var(--plan-soft); color: var(--plan); }
+  .chip.llm { background: var(--ember-soft); color: var(--ember); }
+  .chip.code { background: var(--steel-soft); color: var(--steel); }
+
+  .formula { font-family: var(--display); font-size: 1.5rem; font-weight: 600; text-align: center; padding: 14px 0 6px; letter-spacing: .01em; }
+  .formula i { font-style: normal; color: var(--ember); }
+
+  figure { margin: 0; }
+  .diagram { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; box-shadow: var(--shadow); overflow-x: auto; }
+  .diagram svg { display: block; width: 100%; height: auto; min-width: 640px; }
+  .diagram.small svg { min-width: 0; max-width: 420px; margin: 0 auto; }
+  figcaption { color: var(--muted); font-size: .9rem; margin-top: 8px; }
+  svg text { font-family: var(--sans); }
+  svg .t-title { font-family: var(--display); font-weight: 600; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 10px; font-size: .9rem; color: var(--ink-2); align-items: center; }
+
+  table { width: 100%; border-collapse: collapse; font-size: .95rem; }
+  th, td { text-align: left; vertical-align: top; padding: 9px 10px; border-bottom: 1px solid var(--line); }
+  th { font-weight: 600; color: var(--ink-2); background: var(--surface-2); }
+  .table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
+  .table-wrap table { min-width: 560px; }
+  td.phase { font-family: var(--display); font-weight: 600; white-space: nowrap; }
+
+  .budget { display: flex; height: 38px; border-radius: 10px; overflow: hidden; border: 1px solid var(--line); margin-top: 6px; }
+  .budget div { display: flex; align-items: center; justify-content: center; font-size: .8rem; font-weight: 600; color: #fff; white-space: nowrap; overflow: hidden; }
+  .budget-key { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 4px 14px; margin-top: 10px; font-size: .88rem; color: var(--ink-2); }
+  .sw { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+
+  .steps { counter-reset: s; list-style: none; padding: 0; margin: 0; }
+  .steps li { position: relative; padding: 0 0 18px 52px; }
+  .steps li::before { counter-increment: s; content: counter(s); position: absolute; left: 0; top: 0; width: 34px; height: 34px; border-radius: 50%; background: var(--surface); border: 2px solid var(--ember); color: var(--ember); font-family: var(--display); font-weight: 700; display: grid; place-items: center; }
+  .steps li::after { content: ""; position: absolute; left: 17px; top: 36px; bottom: 2px; width: 2px; background: var(--line); }
+  .steps li:last-child::after { display: none; }
+  .steps b { font-family: var(--display); }
+
+  .principles h3 { color: var(--ember); font-size: 1rem; margin-bottom: 6px; }
+  .principles ol { margin: 0; padding-left: 1.4em; }
+  .principles li { margin: 4px 0; }
+
+  .ladder { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+  .ladder li { display: grid; grid-template-columns: 52px 1fr; gap: 12px; align-items: center; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
+  .ladder .id { font-family: var(--display); font-weight: 700; color: var(--steel); }
+
+  .timeline { list-style: none; padding: 0; margin: 0; }
+  .timeline li { display: grid; grid-template-columns: 54px 1fr; gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+  .timeline .m { font-family: var(--display); font-weight: 700; font-size: 1.15rem; }
+  .timeline .when { color: var(--muted); font-size: .9rem; }
+
+  dl.gloss { display: grid; grid-template-columns: 1fr; gap: 2px 18px; margin: 0; }
+  @media (min-width: 700px) { dl.gloss { grid-template-columns: 170px 1fr; } }
+  dl.gloss dt { font-family: var(--display); font-weight: 600; padding-top: 8px; }
+  dl.gloss dd { margin: 0; padding: 0 0 8px; border-bottom: 1px solid var(--line); color: var(--ink-2); }
+  @media (min-width: 700px) { dl.gloss dt { border-bottom: 1px solid var(--line); padding-bottom: 8px; } dl.gloss dd { padding-top: 8px; } }
+
+  .note { background: var(--steel-soft); border: 1px solid var(--steel-line); border-radius: 12px; padding: 12px 16px; color: var(--ink-2); }
+  .warn { background: var(--ember-soft); border: 1px solid var(--ember-line); border-radius: 12px; padding: 12px 16px; }
+  footer { border-top: 1px solid var(--line); color: var(--muted); font-size: .9rem; padding: 22px 0 40px; }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap hero-inner">
+    <div class="eyebrow">Physical-Engineering's Last Exam · Agent Harness</div>
+    <h1><span>Völund</span>: แบบของ harness</h1>
+    <p class="lede">เอกสารนี้อธิบายให้ทีมเห็นภาพเดียวกันว่าเราจะสร้างอะไร ทำไมออกแบบแบบนี้ และตอนนี้ไปถึงไหนแล้ว รายละเอียดทุกข้ออยู่ใน <a href="../DESIGN.md">DESIGN.md</a></p>
+    <div class="facts">
+      <span class="fact">ปิดรับงาน <b>6 ม.ค. 2027 06:59</b> เวลาไทย</span>
+      <span class="fact">ทีมตั้งเป้าส่ง <b>4 ม.ค.</b></span>
+      <span class="fact">ภาษา <b>Rust</b> · license <b>Apache-2.0</b></span>
+      <span class="fact">ปรับปรุง <b>16 พ.ย. 2026</b></span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap layout">
+  <nav class="toc" aria-label="สารบัญ">
+    <ol>
+      <li><a href="#status">สถานะตอนนี้</a></li>
+      <li><a href="#contest">โจทย์ในหน้าเดียว</a></li>
+      <li><a href="#system">ภาพรวมระบบ</a></li>
+      <li><a href="#journey">หนึ่ง task เดินอย่างไร</a></li>
+      <li><a href="#world">World Model</a></li>
+      <li><a href="#fsm">Phase State Machine</a></li>
+      <li><a href="#principles">หลักการ 14 ข้อ</a></li>
+      <li><a href="#code">โครงสร้างโค้ด</a></li>
+      <li><a href="#eval">แผนวัดผล</a></li>
+      <li><a href="#plan">Milestones</a></li>
+      <li><a href="#team">บทบาททีม</a></li>
+      <li><a href="#gloss">คำศัพท์</a></li>
+    </ol>
+  </nav>
+
+  <main>
+
+    <section id="status">
+      <h2>สถานะตอนนี้</h2>
+      <p class="sub">16 พ.ย. 2026</p>
+      <div class="grid g2">
+        <div class="card status">
+          <h3>เสร็จแล้ว <span class="chip done">M1</span></h3>
+          <ul>
+            <li>server ที่คุย protocol v1 ได้ครบ ส่ง <code>done</code> ภายในเวลาแม้โดน cancel</li>
+            <li>LLM client ที่ stream ทุก call, retry เองเมื่อเจอ 429/5xx และไม่ส่ง request ที่โดนปฏิเสธ (400) ซ้ำทั้งที่ยังไม่ได้แก้</li>
+            <li>loop เดียวที่รันงานได้ครบรอบ (ใช้เทียบกับ sample ของผู้จัด)</li>
+            <li><code>kit check --cancel-test</code> ผ่านทุกขั้น โดยใช้ mock model แทนโมเดลจริง build ใช้เวลา 173 วินาที</li>
+            <li>เทสต์ 57 ข้อผ่านหมด รวมเทสต์ที่รันทั้ง task ผ่าน WebSocket จริง</li>
+          </ul>
+        </div>
+        <div class="card status" style="border-left-color: var(--wait)">
+          <h3>กำลังทำ / รอ <span class="chip now">M2</span> <span class="chip wait">รอ GCP</span></h3>
+          <ul>
+            <li><b>M2 กำลังทำ:</b> MCP client สำหรับแอปในงาน world และ driver ที่ให้ World Model กับ State Machine คุม loop</li>
+            <li><b>รอโปรเจกต์ GCP:</b> baseline A0 และการรันกับโมเดลจริงครั้งแรก ต้องมีโปรเจกต์ที่เปิด Vertex AI และงบรายเดือนก่อน</li>
+            <li>สิทธิ์ dataset บน Hugging Face ได้แล้ว</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="contest">
+      <h2>โจทย์ในหน้าเดียว</h2>
+      <p class="sub">เราไม่ได้แข่งตอบคำถาม เราแข่งสร้าง “harness” ซึ่งเป็นโปรแกรมที่พาโมเดลตัวหนึ่งทำงานวิศวกรรมยาว ๆ ให้จบ</p>
+      <div class="grid g4">
+        <div class="card stat"><div class="num">29</div><div class="lbl">งาน dev ที่เปิดให้ดู ใช้พัฒนาและส่งผลเป็น <code>artifacts/</code></div></div>
+        <div class="card stat"><div class="num">56</div><div class="lbl">งาน test ลับ รันงานละ 3 ครั้ง (Stage 2)</div></div>
+        <div class="card stat"><div class="num">6 ชม.</div><div class="lbl">เวลาสูงสุดต่อ task ใน container ที่ไม่มี network</div></div>
+        <div class="card stat"><div class="num">1</div><div class="lbl">โมเดลต่อ entry เลือกจาก 8 ตัวที่ Google สนับสนุน</div></div>
+      </div>
+
+      <div class="grid g2" style="margin-top:14px">
+        <div class="card">
+          <h3>คะแนนของงานแบบ constraint + objective</h3>
+          <div class="formula">s = 0.4·<i>p</i> + 0.6·<i>G</i>·<i>O′</i></div>
+          <ul>
+            <li><i>p</i> คือสัดส่วนของ constraint ที่ผ่าน</li>
+            <li><i>G</i> เป็น 0 ทันทีถ้าพลาด hard constraint แม้ข้อเดียว คะแนนจึงตันที่ 0.4</li>
+            <li><i>O′</i> คือผลด้าน objective (เช่น ต้นทุน น้ำหนัก) เทียบกับคำตอบที่ไม่ได้ optimize</li>
+          </ul>
+          <p class="note">ลำดับที่ถูกจึงเป็น <b>ผ่าน hard constraint ให้ครบก่อน แล้วค่อย optimize</b></p>
+        </div>
+        <div class="card">
+          <h3>งาน rubric และ final message</h3>
+          <p>งานอีกกลุ่มให้ Claude Opus 5.5 เป็น judge อ่านไฟล์งานส่งคู่กับ <code>final_message</code> ที่ harness ส่งตอนจบ ข้อความสรุปตอนจบจึงเป็นส่วนหนึ่งของคะแนน ไม่ใช่แค่คำลา</p>
+          <p>งาน dev 29 งานแบ่งเป็น rubric 14 งาน (ในนี้ 12 งานเป็นงาน “world” ที่มีแอปจำลองให้ใช้ผ่าน MCP), checks 12 งาน และ checks + judge อีก 3 งาน</p>
+          <p>งาน test ลับ: Mechanical 23 · Electrical 18 · Civil 9 · Structural 6</p>
+        </div>
+      </div>
+
+      <div class="grid g2" style="margin-top:14px; align-items:center">
+        <figure class="diagram small" aria-label="ภาพแนวคิดของเส้น Pareto ระหว่างคะแนนกับต้นทุน">
+          <svg viewBox="0 0 380 230" role="img">
+            <title>ภาพแนวคิด: เส้น Pareto ระหว่างคะแนนกับต้นทุน</title>
+            <line x1="44" y1="190" x2="360" y2="190" stroke="#9aa1ab" stroke-width="1.2"/>
+            <line x1="44" y1="190" x2="44" y2="16" stroke="#9aa1ab" stroke-width="1.2"/>
+            <text x="200" y="216" text-anchor="middle" font-size="12" fill="#6b7380">ต้นทุนต่อ task (ถูก → แพง)</text>
+            <text x="16" y="104" text-anchor="middle" font-size="12" fill="#6b7380" transform="rotate(-90 16 104)">คะแนน</text>
+            <polyline points="70,160 70,128 140,128 140,92 225,92 225,48 320,48" fill="none" stroke="#c2410c" stroke-width="2" stroke-dasharray="5 4"/>
+            <circle cx="70" cy="160" r="6" fill="#c2410c"/>
+            <circle cx="140" cy="128" r="6" fill="#c2410c"/>
+            <circle cx="225" cy="92" r="6" fill="#c2410c"/>
+            <circle cx="320" cy="48" r="6" fill="#c2410c"/>
+            <circle cx="165" cy="150" r="6" fill="#c3c8cf"/>
+            <circle cx="255" cy="125" r="6" fill="#c3c8cf"/>
+            <circle cx="300" cy="100" r="6" fill="#c3c8cf"/>
+            <circle cx="110" cy="172" r="6" fill="#c3c8cf"/>
+            <text x="316" y="34" text-anchor="end" font-size="11.5" fill="#1c232c">คะแนนสูงสุด อยู่บนเส้นเสมอ</text>
+            <text x="262" y="142" font-size="11.5" fill="#6b7380">แพงกว่าแต่คะแนนต่ำกว่า</text>
+            <text x="262" y="156" font-size="11.5" fill="#6b7380">= ไม่อยู่บนเส้น</text>
+          </svg>
+          <figcaption>ภาพแนวคิด ไม่ใช่ข้อมูลจริง จุดสีส้มคือ entry ที่ไม่มีใครดีกว่าทั้งสองด้าน</figcaption>
+        </figure>
+        <div class="card">
+          <h3>อันดับคิดแบบ Pareto</h3>
+          <p>อันดับสุดท้ายดูจากคะแนน Stage 2 แต่ entry ต้องอยู่บนเส้น Pareto ระหว่างคะแนนกับต้นทุน และคะแนนเฉลี่ยต้องไม่ต่ำกว่า 0.138</p>
+          <p>แปลว่าทีมที่คะแนนสูงสุดอยู่บนเส้นเสมอ ส่วนทีมอื่นต้อง <b>ถูกกว่าทุกทีมที่คะแนนสูงกว่าตัวเอง</b> ต้นทุนจึงเป็นตัวแปรที่เราต้องคุมได้ตั้งแต่ต้น (effort, จำนวนรอบแก้, งบต่อ phase)</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="system">
+      <h2>ภาพรวมระบบ</h2>
+      <p class="sub">Völund เป็น WebSocket server ใน serve container มันไม่ได้แตะไฟล์โจทย์โดยตรง ทุกอย่างทำผ่านคำขอที่ evaluator ไปรันให้ใน task container</p>
+      <figure class="diagram">
+        <svg viewBox="0 0 760 345" role="img">
+          <title>Evaluator, Völund, model gateway และ task container</title>
+          <defs>
+            <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="#5b6573"/>
+            </marker>
+          </defs>
+          <rect x="10" y="125" width="140" height="90" rx="12" fill="#ffffff" stroke="#c9c3b8"/>
+          <text x="80" y="160" text-anchor="middle" font-size="15" class="t-title" fill="#1c232c">Evaluator</text>
+          <text x="80" y="181" text-anchor="middle" font-size="11.5" fill="#6b7380">kit check · eval/run.py</text>
+          <text x="80" y="198" text-anchor="middle" font-size="11.5" fill="#6b7380">ผู้จัดเป็นคนคุม</text>
+
+          <rect x="290" y="16" width="250" height="288" rx="14" fill="#fdeee4" stroke="#f2c4a6"/>
+          <text x="415" y="44" text-anchor="middle" font-size="17" class="t-title" fill="#c2410c">Völund</text>
+          <text x="415" y="63" text-anchor="middle" font-size="11.5" fill="#6b7380">serve container · 2 CPU · 4 GB</text>
+          <g font-size="12.5" fill="#1c232c">
+            <rect x="310" y="78" width="210" height="34" rx="8" fill="#fff" stroke="#f2c4a6"/><text x="415" y="100" text-anchor="middle">server · protocol v1</text>
+            <rect x="310" y="120" width="210" height="34" rx="8" fill="#fff" stroke="#f2c4a6"/><text x="415" y="142" text-anchor="middle">driver + Phase State Machine</text>
+            <rect x="310" y="162" width="210" height="34" rx="8" fill="#fff" stroke="#f2c4a6"/><text x="415" y="184" text-anchor="middle">World Model</text>
+            <rect x="310" y="204" width="210" height="34" rx="8" fill="#fff" stroke="#f2c4a6"/><text x="415" y="226" text-anchor="middle">LLM client (stream, retry)</text>
+            <rect x="310" y="246" width="210" height="34" rx="8" fill="#fff" stroke="#f2c4a6"/><text x="415" y="268" text-anchor="middle">tools · MCP client</text>
+          </g>
+
+          <rect x="600" y="16" width="150" height="96" rx="12" fill="#e8f0f8" stroke="#b9cfe4"/>
+          <text x="675" y="50" text-anchor="middle" font-size="14" class="t-title" fill="#1f4e7a">Model gateway</text>
+          <text x="675" y="71" text-anchor="middle" font-size="11.5" fill="#444d58">google-cloud/&lt;id&gt;</text>
+          <text x="675" y="89" text-anchor="middle" font-size="11.5" fill="#444d58">โมเดลเดียวต่อ entry</text>
+
+          <rect x="600" y="166" width="150" height="138" rx="12" fill="#ffffff" stroke="#c9c3b8"/>
+          <text x="675" y="194" text-anchor="middle" font-size="14" class="t-title" fill="#1c232c">Task container</text>
+          <text x="675" y="216" text-anchor="middle" font-size="11.5" fill="#444d58">ไฟล์โจทย์ใน /app ฯลฯ</text>
+          <text x="675" y="235" text-anchor="middle" font-size="11.5" fill="#444d58">bash · python · ไฟล์งานส่ง</text>
+          <text x="675" y="254" text-anchor="middle" font-size="11.5" fill="#444d58">แอปของโจทย์ผ่าน MCP</text>
+          <text x="675" y="281" text-anchor="middle" font-size="11.5" fill="#b42318">ไม่มี network</text>
+
+          <line x1="152" y1="156" x2="286" y2="156" stroke="#5b6573" stroke-width="1.6" marker-end="url(#arr)"/>
+          <line x1="286" y1="180" x2="154" y2="180" stroke="#5b6573" stroke-width="1.6" marker-end="url(#arr)"/>
+          <text x="219" y="146" text-anchor="middle" font-size="12" class="t-title" fill="#1c232c">WebSocket</text>
+          <g font-size="10.8" fill="#444d58">
+            <text x="158" y="202">→ task · result · cancel</text>
+            <text x="158" y="219">← exec · read · write · http</text>
+            <text x="158" y="236">← log · usage · done</text>
+          </g>
+
+          <line x1="542" y1="64" x2="596" y2="64" stroke="#1f4e7a" stroke-width="1.6" marker-end="url(#arr)"/>
+          <text x="569" y="55" text-anchor="middle" font-size="10.8" fill="#1f4e7a">HTTPS</text>
+
+          <polyline points="80,215 80,326 675,326 675,308" fill="none" stroke="#5b6573" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#arr)"/>
+          <text x="420" y="320" text-anchor="middle" font-size="11.5" fill="#444d58">evaluator รันคำขอให้ใน task container แล้วส่งผลกลับเป็น result</text>
+        </svg>
+        <figcaption>serve container ออก network ได้เฉพาะ model gateway ผ่าน egress proxy ห้ามใช้ web search หรือ tool ฝั่ง provider</figcaption>
+      </figure>
+
+      <div class="grid g3" style="margin-top:14px">
+        <div class="card"><h3>กติกาของ protocol ที่ต้องระวัง</h3>
+          <ul>
+            <li>frame ละไม่เกิน 16 MiB และรันพร้อมกันได้ไม่เกิน 8 request</li>
+            <li>ส่ง frame ผิดรูปแบบเกิน 20 ครั้ง task จบทันที</li>
+            <li>ได้ <code>cancel</code> แล้วมีเวลา 10 วินาทีให้ส่ง <code>done</code></li>
+          </ul></div>
+        <div class="card"><h3>คำสั่งใน task container</h3>
+          <ul>
+            <li><code>exec</code> คือ <code>bash -c</code> ใน shell ใหม่ทุกครั้ง <code>cd</code> กับ export ไม่ติดไปคำสั่งถัดไป</li>
+            <li>รันได้นานสุด 600 วินาทีต่อคำสั่ง output เกิน 100 KB เหลือแค่หัวกับท้าย</li>
+            <li>อ่านเขียนไฟล์ได้ครั้งละไม่เกิน 10 MB</li>
+          </ul></div>
+        <div class="card"><h3>เรื่องของโมเดล</h3>
+          <ul>
+            <li>เรียกโมเดลอื่นนอกจากที่ประกาศไว้จะได้ 403</li>
+            <li>Opus 5.5 ไม่รับ temperature, top_p และการบังคับ tool</li>
+            <li>ต้องเก็บข้อความของโมเดลเป็น JSON ดิบ ไม่อย่างนั้นข้อมูลอย่าง thought signature จะหายแล้วรอบถัดไปพัง</li>
+          </ul></div>
+      </div>
+    </section>
+
+    <section id="journey">
+      <h2>หนึ่ง task เดินอย่างไร</h2>
+      <p class="sub">เส้นทางเป้าหมายของ M2–M3 ตอนนี้ (M1) ยังเป็น loop เดียว แต่ส่วนต้นกับส่วนท้ายทำงานแบบนี้แล้ว</p>
+      <div class="card">
+        <ol class="steps">
+          <li><b>รับงาน</b> evaluator เปิด WebSocket แล้วส่ง task มา มีโจทย์, โฟลเดอร์ทำงาน, เวลาที่เหลือ และรายชื่อ MCP server (ถ้ามี)</li>
+          <li><b>PROBE</b> <span class="chip code">โค้ด</span> สำรวจไฟล์และเครื่องมือใน container (python, library, ตัวแปลง pdf) และขอรายชื่อ tool ของแอป โดยไม่เรียกโมเดลเลย</li>
+          <li><b>INTAKE</b> <span class="chip llm">LLM</span> โมเดลอ่านโจทย์กับไฟล์ แล้วบันทึกลง World ว่าต้องส่งอะไร ที่ไหน ใช้ค่าอะไรจากไหน และมี constraint อะไรบ้าง</li>
+          <li><b>MODEL → SOLVE</b> <span class="chip llm">LLM</span> เขียนโมเดลคำนวณพร้อมเทสต์ไว้ใน <code>/tmp/volund/model/</code> harness เป็นคนรันเทสต์เอง จากนั้นหาคำตอบที่ผ่าน hard constraint ก่อน แล้วค่อย optimize</li>
+          <li><b>WRITE</b> <span class="chip llm">LLM</span> เขียนโครงไฟล์งานส่งตั้งแต่ต้นแล้วค่อยเติมให้ครบ ทำ action ในแอปจริง (ส่งอีเมล ปิดเคส) แล้วอ่านกลับเพื่อยืนยัน</li>
+          <li><b>CHECK</b> <span class="chip code">โค้ด</span> ตรวจแบบไม่ใช้โมเดล: ไฟล์อยู่ครบและไม่ว่าง, เปิดได้ตาม format, ไม่มีไฟล์ทดค้างในโฟลเดอร์ที่ถูกตรวจ</li>
+          <li><b>VERIFY ↺ FIX</b> <span class="chip llm">LLM</span> ใช้ context ใหม่คำนวณซ้ำด้วยวิธีอื่นเพื่อหาช่องโหว่ ถ้าเจอก็แก้ แต่จะเก็บผลการแก้ไว้เฉพาะเมื่อคะแนนประมาณไม่ลดลง</li>
+          <li><b>FINALIZE</b> <span class="chip code">โค้ด</span> สร้าง <code>final_message</code> จาก World (ไฟล์และ path, ผลหลัก, code ที่ใช้, สมมติฐาน, ข้อจำกัด) แล้วส่ง <code>done</code></li>
+        </ol>
+        <p class="warn" style="margin-top:6px"><b>ทุกขั้น:</b> ถ้าได้ <code>cancel</code> หรือเวลาใกล้หมด ให้กระโดดไป FINALIZE ทันที ซึ่งสรุปจาก World ได้โดยไม่ต้องรอโมเดล เราจึงมี <code>done</code> ที่มีเนื้อหาเสมอ</p>
+      </div>
+    </section>
+
+    <section id="world">
+      <h2>World Model</h2>
+      <p class="sub">บทสนทนากับโมเดลไม่ใช่บันทึกหลัก สิ่งที่ขั้นหลังต้องใช้ทั้งหมดต้องอยู่ใน World</p>
+      <div class="grid g2">
+        <div class="card">
+          <h3>ชั้นที่ 1: สถานะของโปรเจกต์</h3>
+          <div class="table-wrap" style="box-shadow:none; border:0">
+            <table>
+              <tr><th>ส่วน</th><th>เก็บอะไร</th></tr>
+              <tr><td><code>deliverables</code></td><td>path, format, สถานะ Missing → Draft → Written → Checked</td></tr>
+              <tr><td><code>params</code></td><td>ค่า, หน่วย และที่มา (ไฟล์, หน้า, clause หรือ cell)</td></tr>
+              <tr><td><code>constraints</code></td><td>hard หรือ soft, ค่าที่คำนวณได้, ผ่านหรือไม่</td></tr>
+              <tr><td><code>actions</code></td><td>action ในแอป Pending → Done → Verified (ยืนยันด้วยการอ่านกลับ)</td></tr>
+              <tr><td><code>model</code>, <code>checks</code>, <code>issues</code></td><td>ผลเทสต์ที่ harness รันเอง, ผล CHECK, ช่องโหว่ที่ VERIFY พบ</td></tr>
+            </table>
+          </div>
+        </div>
+        <div class="card">
+          <h3>ชั้นที่ 2: โมเดลคำนวณที่รันได้</h3>
+          <p>อยู่ใน task container ที่ <code>/tmp/volund/model/</code></p>
+          <ul>
+            <li><code>model.py</code> สูตรของโปรเจกต์ เช่น load → shear หรือขนาดสาย → voltage drop และราคา</li>
+            <li><code>tests.py</code> เทียบกับค่าที่เอกสารให้มา บรรทัดสุดท้ายพิมพ์ <code>{"total": N, "passed": M}</code> และ <b>harness รันเอง ไม่เชื่อคำบอกของโมเดล</b></li>
+            <li><code>solve.py</code> ไล่หาทางเลือก ผ่าน hard constraint ก่อนแล้วค่อยลด objective</li>
+          </ul>
+        </div>
+      </div>
+      <div class="grid g3" style="margin-top:14px">
+        <div class="card"><h3>3 ฟังก์ชันที่ใช้ตัดสินใจ</h3>
+          <ul>
+            <li><code>brief()</code> เขียน World เป็นข้อความใส่ทุก prompt พอ context เต็มก็ตัดของเก่าทิ้งแล้ว render ใหม่ ไม่ต้องสรุปบทสนทนา</li>
+            <li><code>finish_blockers()</code> ด่านก่อนจบ บอกว่ายังขาดอะไร</li>
+            <li><code>quality()</code> ประมาณคะแนนในรูปเดียวกับ grader ใช้ตัดสินว่าจะเก็บผลการแก้หรือ rollback</li>
+          </ul></div>
+        <div class="card"><h3>ใครเขียนอะไร</h3>
+          <ul>
+            <li><b>harness:</b> ส่วนที่หาได้แน่นอน เช่น รายชื่อไฟล์, ผลเทสต์, ผล CHECK</li>
+            <li><b>โมเดล:</b> เขียนผ่าน tool <code>world_deliverable</code>, <code>world_param</code>, <code>world_constraint</code>, <code>world_action</code> และอื่น ๆ</li>
+          </ul></div>
+        <div class="card"><h3>เมื่อข้อมูลขัดกัน</h3>
+          <p><b>ไฟล์งานส่งชนะเสมอ</b> เพราะเป็นสิ่งที่ถูกตรวจ ให้อ่านไฟล์แล้วปรับ World ตาม ห้ามทำกลับทาง</p></div>
+      </div>
+    </section>
+
+    <section id="fsm">
+      <h2>Phase State Machine</h2>
+      <p class="sub">โค้ดเป็นคนตัดสินว่าจะไปขั้นไหนต่อ ไม่ใช่โมเดล เพราะโมเดลมักหยุดก่อนงานเสร็จหรือวนอยู่ที่เดิม</p>
+      <figure class="diagram">
+        <svg viewBox="0 0 760 312" role="img">
+          <title>ลำดับ phase ของ Völund</title>
+          <defs>
+            <marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="#5b6573"/>
+            </marker>
+          </defs>
+          <g font-size="13.5" class="t-title" text-anchor="middle">
+            <rect x="10" y="40" width="130" height="44" rx="10" fill="#e8f0f8" stroke="#b9cfe4"/><text x="75" y="67" fill="#1f4e7a">PROBE</text>
+            <rect x="160" y="40" width="130" height="44" rx="10" fill="#fdeee4" stroke="#f2c4a6"/><text x="225" y="67" fill="#c2410c">INTAKE</text>
+            <rect x="310" y="40" width="130" height="44" rx="10" fill="#fdeee4" stroke="#f2c4a6"/><text x="375" y="67" fill="#c2410c">MODEL</text>
+            <rect x="460" y="40" width="130" height="44" rx="10" fill="#fdeee4" stroke="#f2c4a6"/><text x="525" y="67" fill="#c2410c">SOLVE</text>
+            <rect x="610" y="40" width="130" height="44" rx="10" fill="#fdeee4" stroke="#f2c4a6"/><text x="675" y="67" fill="#c2410c">WRITE</text>
+            <rect x="160" y="170" width="130" height="44" rx="10" fill="#e8f0f8" stroke="#b9cfe4"/><text x="225" y="197" fill="#1f4e7a">CHECK</text>
+            <rect x="310" y="170" width="130" height="44" rx="10" fill="#fdeee4" stroke="#f2c4a6"/><text x="375" y="197" fill="#c2410c">VERIFY</text>
+            <rect x="460" y="170" width="130" height="44" rx="10" fill="#e8f0f8" stroke="#b9cfe4"/><text x="525" y="197" fill="#1f4e7a">FINALIZE</text>
+            <rect x="610" y="170" width="130" height="44" rx="10" fill="#1c232c"/><text x="675" y="197" fill="#ffffff">DONE</text>
+            <rect x="235" y="244" width="130" height="44" rx="10" fill="#fdeee4" stroke="#c2410c" stroke-width="1.5"/><text x="300" y="271" fill="#c2410c">FIX</text>
+          </g>
+          <g stroke="#5b6573" stroke-width="1.6" fill="none">
+            <line x1="140" y1="62" x2="157" y2="62" marker-end="url(#arr2)"/>
+            <line x1="290" y1="62" x2="307" y2="62" marker-end="url(#arr2)"/>
+            <line x1="440" y1="62" x2="457" y2="62" marker-end="url(#arr2)"/>
+            <line x1="590" y1="62" x2="607" y2="62" marker-end="url(#arr2)"/>
+            <polyline points="675,84 675,127 225,127 225,167" marker-end="url(#arr2)"/>
+            <line x1="290" y1="192" x2="307" y2="192" marker-end="url(#arr2)"/>
+            <line x1="440" y1="192" x2="457" y2="192" marker-end="url(#arr2)"/>
+            <line x1="590" y1="192" x2="607" y2="192" marker-end="url(#arr2)"/>
+            <polyline points="190,214 190,266 232,266" marker-end="url(#arr2)"/>
+            <polyline points="405,214 405,266 368,266" marker-end="url(#arr2)"/>
+            <line x1="262" y1="244" x2="262" y2="217" marker-end="url(#arr2)"/>
+            <polyline points="225,40 225,20 675,20 675,37" stroke-dasharray="5 4" marker-end="url(#arr2)"/>
+            <line x1="525" y1="240" x2="525" y2="217" stroke-dasharray="5 4" marker-end="url(#arr2)"/>
+          </g>
+          <g font-size="11.5" fill="#444d58">
+            <text x="450" y="15" text-anchor="middle">ไม่มี constraint ให้คำนวณ: ข้าม MODEL/SOLVE</text>
+            <text x="298" y="185" text-anchor="middle" font-size="10.5">ผ่าน</text>
+            <text x="449" y="185" text-anchor="middle" font-size="10.5">ผ่าน</text>
+            <text x="150" y="240" text-anchor="middle">ไม่ผ่าน</text>
+            <text x="440" y="240" text-anchor="middle">มีช่องโหว่</text>
+            <text x="300" y="304" text-anchor="middle" font-size="10.5">snapshot → แก้ → เก็บเมื่อคะแนนไม่ลด (Δ≥0)</text>
+          </g>
+          <rect x="470" y="240" width="280" height="50" rx="10" fill="#ffffff" stroke="#9aa1ab" stroke-dasharray="5 4"/>
+          <text x="610" y="261" text-anchor="middle" font-size="11.5" fill="#1c232c">ทุก phase: cancel หรือเวลาใกล้หมด</text>
+          <text x="610" y="279" text-anchor="middle" font-size="11.5" fill="#1c232c">→ ไป FINALIZE ทันที</text>
+        </svg>
+      </figure>
+      <div class="legend">
+        <span><span class="sw" style="background:#fdeee4;border:1px solid #f2c4a6"></span>ใช้ LLM</span>
+        <span><span class="sw" style="background:#e8f0f8;border:1px solid #b9cfe4"></span>โค้ดล้วน ไม่เรียกโมเดล</span>
+        <span>ฟังก์ชัน <code>next()</code> เป็น pure function จึงเทสต์ได้โดยไม่ต้องมีโมเดล</span>
+      </div>
+
+      <h3 style="margin-top:24px">งบเวลาตั้งต้นของแต่ละ phase</h3>
+      <div class="budget" role="img" aria-label="INTAKE 10, MODEL 20, SOLVE 15, WRITE 20, VERIFY 10, FIX 15, อื่น ๆ 10 เปอร์เซ็นต์">
+        <div style="flex:10;background:#e07a3f">INTAKE 10%</div>
+        <div style="flex:20;background:#c2410c">MODEL 20%</div>
+        <div style="flex:15;background:#9a3412">SOLVE 15%</div>
+        <div style="flex:20;background:#d9622b">WRITE 20%</div>
+        <div style="flex:10;background:#1f4e7a">VERIFY 10%</div>
+        <div style="flex:15;background:#3b6e9e">FIX 15%</div>
+        <div style="flex:10;background:#9aa1ab">อื่น ๆ</div>
+      </div>
+      <div class="budget-key">
+        <span><span class="sw" style="background:#9aa1ab"></span>PROBE ≤ 2 นาที, CHECK สั้น ๆ</span>
+        <span><span class="sw" style="background:#1c232c"></span>FINALIZE กันไว้ 4 นาทีเสมอ</span>
+        <span>ตัวเลขเป็นค่าตั้งต้น จะปรับตามผลวัดใน M5</span>
+      </div>
+
+      <div class="grid g2" style="margin-top:16px">
+        <div class="card"><h3>กติกาที่ใช้ทุก phase</h3>
+          <ol>
+            <li>cancel หรือเวลาเหลือน้อย → FINALIZE</li>
+            <li>งบของ phase หมด → เดินหน้าเสมอ ห้ามค้าง เช่น MODEL ที่เทสต์ยังไม่ผ่านก็ไป WRITE ด้วยสิ่งที่มี</li>
+            <li>ก่อน FIX ให้ snapshot ไฟล์งานส่งและ World ถ้าแก้แล้ว <code>quality()</code> ลดลงให้ rollback แล้วจบ ไม่เสี่ยงทำของดีให้พัง</li>
+            <li>ข้าม phase ได้ตามสิ่งที่อยู่ใน World <b>ห้ามแยกทางตาม task id, ชื่อ หรือ path ของงาน dev</b></li>
+          </ol></div>
+        <div class="card"><h3>ทำไมไม่ปล่อยให้โมเดลคุมเอง</h3>
+          <ul>
+            <li>งานยาวถึง 6 ชั่วโมง context ยาวขึ้นเรื่อย ๆ โมเดลลืมข้อกำหนดตอนต้น</li>
+            <li>โมเดลชอบประกาศว่าเสร็จก่อนงานครบ ด่านก่อนจบกันเรื่องนี้</li>
+            <li>การตรวจงานตัวเองใน context เดียวกันมักเห็นด้วยกับตัวเอง VERIFY จึงใช้ context ใหม่</li>
+            <li>ต้นทุนคุมได้ เพราะทุก phase มีงบ</li>
+          </ul></div>
+      </div>
+    </section>
+
+    <section id="principles">
+      <h2>หลักการ 14 ข้อ</h2>
+      <p class="sub">ใช้ตรวจทุกการเปลี่ยนแปลงของ harness</p>
+      <div class="grid g3 principles">
+        <div class="card"><h3>วิศวกรรม</h3><ol start="1">
+          <li>ผ่าน hard constraint ให้ครบก่อน แล้วค่อย optimize</li>
+          <li>ตัวเลขทุกตัวได้จากโค้ดและมีหน่วยกำกับ เก็บ script ไว้เป็นหลักฐาน</li>
+          <li>อ่านแบบด้วยการดูภาพ (render แล้วซูม) ไม่พึ่งแค่ข้อความที่ดึงออกมา</li>
+          <li>งาน world ต้องทำ action จริงในแอปและยืนยันด้วยการอ่านกลับ</li></ol></div>
+        <div class="card"><h3>ความถูกต้อง</h3><ol start="5">
+          <li>World เป็นแหล่งความจริงของสิ่งที่ต้องทำ ไฟล์เป็นแหล่งความจริงของผลลัพธ์</li>
+          <li>ตรวจ 2 ชั้น: โค้ด (CHECK) แล้วตามด้วย context ใหม่ (VERIFY)</li>
+          <li>ด่านก่อนจบกันการหยุดก่อนเวลา</li></ol></div>
+        <div class="card"><h3>การส่งงาน</h3><ol start="8">
+          <li>ต้องมีงานส่งอยู่เสมอ: เขียนโครงตั้งแต่ต้น และ <code>done</code> ต้องไม่ว่างแม้โดน cancel</li>
+          <li><code>final_message</code> เป็นส่วนหนึ่งของงาน: ไฟล์และ path, ผลหลัก, code และมาตรฐาน, สมมติฐาน, ข้อจำกัด</li></ol></div>
+        <div class="card"><h3>ต้นทุน</h3><ol start="10">
+          <li>ปรับต้นทุนจาก effort, จำนวนรอบ, งบต่อ phase และ best-of-N</li>
+          <li>ประหยัด context: PROBE ไม่ใช้ LLM, ตัด output เก็บหัวท้าย, render ใหม่จาก World, ใส่ cache mark</li>
+          <li>คิดอันดับแบบ Pareto: ต้องถูกกว่าทุกทีมที่คะแนนสูงกว่า</li></ol></div>
+        <div class="card"><h3>การแข่งและการทดลอง</h3><ol start="13">
+          <li>ใช้ได้ทั่วไป ห้ามผูกกับงานใดงานหนึ่ง แยกวิธีตามประเภทงานส่ง ไม่ใช่ตาม task</li>
+          <li>วัดทุกครั้งและเปลี่ยนทีละอย่าง จดสิ่งที่ไม่ได้ผลไว้ด้วย</li></ol></div>
+      </div>
+    </section>
+
+    <section id="code">
+      <h2>โครงสร้างโค้ด</h2>
+      <p class="sub">Rust workspace เดียว แบ่งเป็น crate ตามหน้าที่ ทุก crate มีเทสต์ของตัวเอง</p>
+      <div class="table-wrap">
+        <table>
+          <tr><th>crate</th><th>หน้าที่</th><th>สถานะ</th></tr>
+          <tr><td><code>volund</code></td><td>binary ของ server: รับ 1 task ต่อการเชื่อมต่อ, loop ของ agent, tool</td><td><span class="chip done">M1</span> <span class="chip now">driver: M2</span></td></tr>
+          <tr><td><code>volund-llm</code></td><td>client ของ Chat Completions แบบ stream, retry, ปรับ request เมื่อโดนปฏิเสธ</td><td><span class="chip done">M1</span></td></tr>
+          <tr><td><code>volund-proto</code></td><td>type ของ protocol v1 และตัวกันไม่ให้ส่ง frame ผิดรูปแบบ</td><td><span class="chip done">M1</span></td></tr>
+          <tr><td><code>volund-world</code></td><td>World Model, ด่านก่อนจบ, ค่าประมาณคะแนน</td><td><span class="chip done">มีแล้ว</span> <span class="chip now">ต่อเข้า loop: M2</span></td></tr>
+          <tr><td><code>volund-fsm</code></td><td>Phase State Machine เป็น pure function</td><td><span class="chip done">มีแล้ว</span> <span class="chip now">ต่อเข้า loop: M2</span></td></tr>
+          <tr><td><code>volund-mock</code></td><td>โมเดลปลอมที่ตอบตามสคริปต์ ใช้ในเทสต์และ <code>kit check</code> ก่อนมีโมเดลจริง ไม่อยู่ในงานที่ส่ง</td><td><span class="chip done">M1</span></td></tr>
+          <tr><td>MCP client</td><td>คุยกับแอปของโจทย์ (JSON-RPC ผ่านคำขอ <code>http</code>) ถ้ามี tool ไม่เกิน 128 ตัวจะส่งให้โมเดลตรง ๆ ถ้ามากกว่านั้นจะให้ค้นด้วย <code>mcp_find</code> แล้วเรียกด้วย <code>mcp_call</code></td><td><span class="chip now">M2</span></td></tr>
+        </table>
+      </div>
+      <p class="note" style="margin-top:14px">build: container ของผู้จัดไม่มี Rust ไฟล์ <code>submission.yaml</code> จึงติดตั้ง Rust 1.98.1 ลงใน <code>/tmp</code> แล้ว build แล้ว copy มาเฉพาะ binary ส่วน <code>serve.py</code> กับ <code>harness.py</code> มีไว้แค่เปิด binary ทุก dependency ใช้ license แบบ permissive (MIT, Apache-2.0, BSD, ISC)</p>
+    </section>
+
+    <section id="eval">
+      <h2>แผนวัดผล</h2>
+      <p class="sub">วัดทุกครั้ง เปลี่ยนทีละอย่าง แล้วเอาผลไปเขียน writeup</p>
+      <div class="grid g2">
+        <div class="card"><h3>ขั้น A: Mac (ใช้พัฒนา) <span class="chip now">ตอนนี้</span></h3>
+          <ul>
+            <li><code>kit check</code> ครบทุกขั้น และงานที่ไม่ใช่ world ทีละงาน</li>
+            <li>Docker ได้ 1 ช่องพอดี image ของงาน world ใหญ่ราว 17 GB ต่อตัวจึงรันบน Mac ไม่ไหว</li>
+            <li>รัน amd64 แบบ emulation ช้า งานที่จับเวลาจะได้คะแนนต่ำลง <b>ตัวเลขจาก Mac ห้ามใช้เป็นตัวเลขที่ส่ง</b></li>
+          </ul></div>
+        <div class="card"><h3>ขั้น B: Linux VM แบบ amd64 (ตัวเลขจริง) <span class="chip wait">รองบ</span></h3>
+          <ul>
+            <li>งาน world, การรันเต็ม 29 งาน, การเทียบโมเดล และ <code>artifacts/</code> ที่จะส่ง</li>
+            <li>ขนาดอย่างน้อย 16 vCPU, 64 GB, ดิสก์ 300 GB ได้ 2 ช่อง</li>
+            <li>ค่าโมเดลทั้งของ harness และของ judge คิดจากโปรเจกต์ GCP ของเรา ต้องตั้งงบก่อน</li>
+          </ul></div>
+      </div>
+
+      <div class="grid g2" style="margin-top:14px">
+        <div>
+          <h3 style="margin-bottom:8px">Ablation: เพิ่มทีละชั้นแล้ววัด</h3>
+          <ol class="ladder">
+            <li><span class="id">A0</span><span>sample <code>custom-openai</code> ของผู้จัด (baseline)</span></li>
+            <li><span class="id">A1</span><span>Völund แบบ loop เดียว ต้องได้เท่า A0 <span class="chip done">พร้อม</span></span></li>
+            <li><span class="id">A2</span><span>+ PROBE</span></li>
+            <li><span class="id">A3</span><span>+ World และการ render ใหม่จาก World</span></li>
+            <li><span class="id">A4</span><span>+ State Machine และด่านก่อนจบ</span></li>
+            <li><span class="id">A5</span><span>+ MODEL/SOLVE (โมเดลคำนวณที่รันได้)</span></li>
+            <li><span class="id">A6</span><span>+ VERIFY และการเก็บผลเมื่อคะแนนไม่ลด</span></li>
+            <li><span class="id">A7</span><span>+ <code>view_page</code> (ดูแบบเป็นภาพ)</span></li>
+          </ol>
+          <p class="sub" style="margin-top:8px">และ scaling: effort low/medium/high × จำนวนรอบแก้ 0–3 × best-of-N บนโมเดลที่จะส่งและอีกอย่างน้อย 1 ตระกูล</p>
+        </div>
+        <div>
+          <h3 style="margin-bottom:8px">ป้ายสาเหตุที่พลาด</h3>
+          <div class="table-wrap">
+            <table>
+              <tr><th>ป้าย</th><th>ความหมาย</th></tr>
+              <tr><td class="mono">READ_DRAWING</td><td>อ่านแบบหรือ callout ผิด</td></tr>
+              <tr><td class="mono">WRONG_CLAUSE</td><td>ใช้ clause หรือตาราง code ผิด</td></tr>
+              <tr><td class="mono">UNIT</td><td>หน่วยหรือการแปลงหน่วยผิด</td></tr>
+              <tr><td class="mono">HALLUCINATED_INPUT</td><td>ใช้ค่าที่ไม่มีในไฟล์</td></tr>
+              <tr><td class="mono">HARD_CONSTRAINT</td><td>ผิด hard constraint</td></tr>
+              <tr><td class="mono">NOT_OPTIMIZED</td><td>ผ่าน constraint แต่ objective ต่ำ</td></tr>
+              <tr><td class="mono">DELIVERABLE_FORMAT</td><td>path, format หรือการแพ็กผิด</td></tr>
+              <tr><td class="mono">MISSED_ACTION</td><td>ไม่ได้ทำ action ในแอป</td></tr>
+              <tr><td class="mono">STOPPED_EARLY</td><td>จบก่อนงานครบ</td></tr>
+              <tr><td class="mono">TIMEOUT_CRASH</td><td>harness ล่มหรือหมดเวลา</td></tr>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="plan">
+      <h2>Milestones</h2>
+      <p class="sub">ช่วงเวลาเป็นแผน วันส่งจริงคือ 4 ม.ค.</p>
+      <div class="card">
+        <ol class="timeline">
+          <li><span class="m">M0</span><div><span class="when">15–17 พ.ย.</span> <span class="chip done">เสร็จส่วนใหญ่</span><br>โครง repo, สิทธิ์ dataset, ตั้งโปรเจกต์ GCP <span class="chip wait">รอ</span>, ทีมอ่านโจทย์ dev 3–4 งาน</div></li>
+          <li><span class="m">M1</span><div><span class="when">18–24 พ.ย.</span> <span class="chip done">เสร็จยกเว้นส่วนที่ต้องใช้โมเดลจริง</span><br>server, LLM client, loop เดียว, <code>submission.yaml</code>, <code>kit check</code> ผ่านบน Mac, baseline A0 <span class="chip wait">รอ GCP</span></div></li>
+          <li><span class="m">M2</span><div><span class="when">25 พ.ย.–1 ธ.ค.</span> <span class="chip now">เริ่มแล้ว</span><br>driver + World + State Machine + tool + MCP, รันเต็มชุดครั้งแรกบน VM, ติดป้ายสาเหตุที่พลาด</div></li>
+          <li><span class="m">M3</span><div><span class="when">2–8 ธ.ค.</span> <span class="chip plan">แผน</span><br>MODEL/SOLVE, CHECK, VERIFY, ด่านก่อนจบ, เทียบ 2 โมเดลขึ้นไปแล้ว<b>เลือกโมเดล</b></div></li>
+          <li><span class="m">M4</span><div><span class="when">9–15 ธ.ค.</span> <span class="chip plan">แผน</span><br><code>view_page</code>, ตัวตรวจการแพ็ก, ขั้น optimize, ablation</div></li>
+          <li><span class="m">M5</span><div><span class="when">16–22 ธ.ค.</span> <span class="chip plan">แผน</span><br>กราฟคะแนนกับต้นทุน, ทดสอบ cancel และ retry, ปรับงบต่อ phase</div></li>
+          <li><span class="m">M6</span><div><span class="when">23–29 ธ.ค.</span> <span class="chip plan">แผน</span><br>หยุดเพิ่มฟีเจอร์, รันเต็มชุด 2 รอบด้วยโมเดลที่จะส่ง, <code>artifacts/</code></div></li>
+          <li><span class="m">M7</span><div><span class="when">30 ธ.ค.–4 ม.ค.</span> <span class="chip plan">แผน</span><br>writeup ไม่เกิน 2,000 คำ + 3 รูป + ภาพปก, <code>kit check</code> ได้ <code>ready to submit</code>, ส่ง</div></li>
+        </ol>
+      </div>
+    </section>
+
+    <section id="team">
+      <h2>บทบาททีม</h2>
+      <p class="sub">ให้ทีมตกลงกันว่าใครรับสายไหน</p>
+      <div class="grid g2">
+        <div class="card"><h3>Core (Rust)</h3><p>server, LLM client, driver, MCP</p></div>
+        <div class="card"><h3>Tools และเอกสาร</h3><p>PROBE, CHECK, <code>view_page</code>, ตัวตรวจการแพ็ก</p></div>
+        <div class="card"><h3>วิธีทางวิศวกรรม</h3><p>playbook ตามประเภทงานส่ง, checklist ของ VERIFY, ไล่ดูงานที่พลาดด้วยสายตาวิศวกร ต้องมีพื้น EE หรือ ME เพราะงาน test ลับเป็น ME กับ EE รวมกัน 73%</p></div>
+        <div class="card"><h3>Eval และ writeup</h3><p>รัน eval, ติดป้ายสาเหตุ, ablation, ทำรูป, เขียน writeup</p></div>
+      </div>
+      <div class="grid g2" style="margin-top:14px">
+        <div class="card"><h3>สิ่งที่ยังไม่รู้</h3>
+          <ol>
+            <li>ใน task container มี python และ library อะไรบ้าง มีตัวแปลง pdf หรือ libreoffice ไหม และ <code>/tmp</code> เขียนได้หรือไม่</li>
+            <li>gateway รับรูปภาพสำหรับโมเดลที่จะใช้หรือไม่ (มีผลกับหลักข้อ 3)</li>
+            <li>ค่าใช้จ่ายต่อ 1 งานของแต่ละโมเดล</li>
+            <li>โครงสร้าง <code>submission.zip</code> ที่แต่ละงานต้องการ (อ่านจากโจทย์เท่านั้น)</li>
+          </ol></div>
+        <div class="card"><h3>Fair play</h3>
+          <ul>
+            <li>ห้ามอ่านหรือใช้ grader และไฟล์อ้างอิงของงาน dev</li>
+            <li><code>artifacts/</code> ต้องมาจาก <code>eval/run.py</code> ด้วย harness และโมเดลที่ส่งจริง ห้ามแก้ด้วยมือ</li>
+            <li>ห้ามติดต่อ host อื่นนอกจาก model endpoint และห้ามเก็บหรือเผยแพร่ไฟล์ของงาน test</li>
+            <li>ห้าม hard-code คำตอบหรือแยกทางตาม task</li>
+          </ul></div>
+      </div>
+    </section>
+
+    <section id="gloss">
+      <h2>คำศัพท์</h2>
+      <p class="sub">สำหรับคนในทีมที่ไม่ได้อยู่สายซอฟต์แวร์</p>
+      <div class="card">
+        <dl class="gloss">
+          <dt>Harness</dt><dd>โปรแกรมที่พาโมเดลทำงาน: ส่ง prompt, รับคำสั่งที่โมเดลอยากรัน, ไปรันให้, ส่งผลกลับ และตัดสินว่าเมื่อไรพอ สิ่งที่เราส่งแข่งคือตัวนี้</dd>
+          <dt>Serve container</dt><dd>เครื่องจำลองที่ harness ของเรารันอยู่ ออก network ได้แค่ไปหาโมเดล</dd>
+          <dt>Task container</dt><dd>เครื่องจำลองที่มีไฟล์โจทย์ ทุกคำสั่งรันที่นี่ และ grader ตรวจไฟล์ที่นี่</dd>
+          <dt>Deliverable</dt><dd>ไฟล์งานส่งที่โจทย์สั่ง เช่น รายงาน, spreadsheet, zip, ไฟล์ IFC</dd>
+          <dt>Hard constraint</dt><dd>ข้อกำหนดที่พลาดไม่ได้ พลาดข้อเดียวคะแนนตันที่ 0.4</dd>
+          <dt>Rubric / judge</dt><dd>เกณฑ์ให้คะแนนที่ LLM (Claude Opus 5.5) ใช้อ่านงานแล้วให้คะแนน</dd>
+          <dt>MCP</dt><dd>มาตรฐานที่แอปใช้เปิด “tool” ให้ AI เรียก ในงาน world แอปอย่างอีเมลหรือระบบเอกสารเปิด tool ผ่าน MCP</dd>
+          <dt>World Model</dt><dd>บันทึกกลางของ harness ว่าตอนนี้รู้อะไรและต้องทำอะไร ไม่ได้พึ่งความจำของโมเดล</dd>
+          <dt>State Machine</dt><dd>กฎในโค้ดที่บอกว่าจากขั้นนี้ไปขั้นไหนได้ ภายใต้เงื่อนไขอะไร</dd>
+          <dt>Ablation</dt><dd>การทดลองถอดหรือเพิ่มทีละส่วนเพื่อดูว่าส่วนนั้นช่วยคะแนนจริงไหม</dd>
+          <dt>Pareto frontier</dt><dd>กลุ่ม entry ที่ไม่มีใครทั้งถูกกว่าและคะแนนสูงกว่า</dd>
+          <dt>Mock model</dt><dd>โมเดลปลอมที่ตอบตามสคริปต์ ใช้ทดสอบระบบโดยไม่เสียค่าโมเดล</dd>
+        </dl>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<footer>
+  <div class="wrap">Völund · Apache-2.0 · อ้างอิง <code>google-research/ple</code> commit <code>8320f04</code> · รายละเอียดเต็มอยู่ใน <a href="../DESIGN.md">DESIGN.md</a></div>
+</footer>
+
+</body>
+</html>

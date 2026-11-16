@@ -3,8 +3,9 @@
 > ชื่อ Völund (Völundr) มาจากช่างตีเหล็กและนักประดิษฐ์ชั้นครูในตำนาน Norse ผู้สร้างของใช้งานได้จริงจากวัตถุดิบ
 > ตรงกับงานนี้ที่รับโฟลเดอร์โปรเจกต์มาแล้วต้องส่งงานวิศวกรรมที่ใช้ได้จริง
 
-- **สถานะ:** โครง (M0) มี World Model, Phase State Machine และ type ของ protocol พร้อมเทสต์ ยังไม่มี server
-- **ปรับปรุงล่าสุด:** 15 พ.ย. 2026
+- **สถานะ:** M1 มี server, LLM client และ loop เดียวที่รันงานได้ครบรอบ `kit check` ผ่านกับ mock model ส่วน M2 (MCP และ driver) กำลังทำ
+- **ปรับปรุงล่าสุด:** 16 พ.ย. 2026
+- **ฉบับอ่านง่ายสำหรับทีม:** [docs/design.html](docs/design.html)
 - **ปิดรับงาน:** 5 ม.ค. 2027 23:59 UTC (**6 ม.ค. 06:59 เวลาไทย**) ทีมตั้งเป้าส่งภายใน 4 ม.ค.
 
 ## 0. สิ่งที่ตัดสินใจแล้ว
@@ -191,7 +192,7 @@ evaluator ─ws─► volund (serve container: 2 CPU / 4 GB)
 
 - ติดตั้ง toolchain และ target ไว้ใน `/tmp` เพื่อไม่ให้ไปปนใน bundle ใต้ `/opt/harness` แล้ว copy มาเฉพาะ binary
 - ตั้ง `RUSTUP_TOOLCHAIN=1.98.1` เพื่อข้าม `rust-toolchain.toml` ไม่ให้โหลด rustfmt กับ clippy ที่ build ไม่ได้ใช้
-- ตั้ง `CARGO_BUILD_JOBS=2` เพราะ เครื่องที่ใช้ทดสอบรันงานอื่นอยู่ด้วย ถ้าไม่จำกัด build จะกิน CPU ทุก core
+- ตั้ง `CARGO_BUILD_JOBS=2` เพราะเครื่องทดสอบมีงานอื่นรันใน Docker ด้วย ถ้าไม่จำกัด build จะกิน CPU ทุก core
 - TLS ใช้ rustls คู่กับ ring ซึ่ง build ด้วย C compiler อย่างเดียวได้ (build image ไม่มี cmake) และอ่าน root certificate จากระบบของ serve image
 - `serve.py` กับ `harness.py` (หน้า Kaggle ระบุว่าต้องมี) แค่ `exec` ตัว binary
 - บน Mac ตัว kit build เป็น `linux/amd64` แบบ emulation ซึ่งช้า ต้องจับเวลา build ครั้งแรก และต้องเสร็จใน 30 นาทีบนเครื่องผู้จัด
