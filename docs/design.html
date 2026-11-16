@@ -206,13 +206,15 @@
             <li>loop เดียวที่รันงานได้ครบรอบ (ใช้เทียบกับ sample ของผู้จัด)</li>
             <li><code>kit check --cancel-test</code> ผ่านทุกขั้น โดยใช้ mock model แทนโมเดลจริง build ใช้เวลา 173 วินาที</li>
             <li>MCP client <span class="chip done">M2</span> คุยกับแอปของโจทย์ผ่านคำขอ <code>http</code> ได้แล้ว งาน MCP ของ kit รันผ่านในเทสต์</li>
-            <li>เทสต์ 67 ข้อผ่านหมด รวมเทสต์ที่รันทั้ง task ผ่าน WebSocket จริง</li>
+            <li>driver <span class="chip done">M2</span> ให้ State Machine เลือก phase และให้โมเดลบันทึกลง World ผ่าน tool <code>world_*</code> ส่วน CHECK ตรวจไฟล์ด้วยโค้ด, FIX มี snapshot และ rollback, ถ้าโดน cancel จะสรุปจาก World</li>
+            <li>เทสต์ 81 ข้อผ่านหมด รวมเทสต์ที่รันทั้ง task ผ่าน WebSocket จริงทั้งแบบ driver และแบบ loop เดียว</li>
           </ul>
         </div>
         <div class="card status" style="border-left-color: var(--wait)">
           <h3>กำลังทำ / รอ <span class="chip now">M2</span> <span class="chip wait">รอ GCP</span></h3>
           <ul>
-            <li><b>M2 กำลังทำ:</b> driver ที่ให้ World Model กับ State Machine คุม loop แทน loop เดียว</li>
+            <li><b>M2 ที่เหลือ:</b> รันเต็มชุดครั้งแรกบน VM และติดป้ายสาเหตุที่พลาด ต้องมีโมเดลจริงก่อน</li>
+            <li><b>M3:</b> ทำให้ MODEL/SOLVE กับ VERIFY ลึกขึ้นตามผลที่วัดได้จากงานจริง</li>
             <li><b>รอโปรเจกต์ GCP:</b> baseline A0 และการรันกับโมเดลจริงครั้งแรก ต้องมีโปรเจกต์ที่เปิด Vertex AI และงบรายเดือนก่อน</li>
             <li>สิทธิ์ dataset บน Hugging Face ได้แล้ว</li>
           </ul>
@@ -361,7 +363,7 @@
 
     <section id="journey">
       <h2>หนึ่ง task เดินอย่างไร</h2>
-      <p class="sub">เส้นทางเป้าหมายของ M2–M3 ตอนนี้ (M1) ยังเป็น loop เดียว แต่ส่วนต้นกับส่วนท้ายทำงานแบบนี้แล้ว</p>
+      <p class="sub">driver ของ M2 เดินตามเส้นทางนี้แล้ว ส่วนที่จะลงรายละเอียดใน M3 คือคุณภาพของ MODEL/SOLVE และ checklist ของ VERIFY</p>
       <div class="card">
         <ol class="steps">
           <li><b>รับงาน</b> evaluator เปิด WebSocket แล้วส่ง task มา มีโจทย์, โฟลเดอร์ทำงาน, เวลาที่เหลือ และรายชื่อ MCP server (ถ้ามี)</li>
@@ -491,6 +493,7 @@
       <div class="budget-key">
         <span><span class="sw" style="background:#9aa1ab"></span>PROBE ≤ 2 นาที, CHECK สั้น ๆ</span>
         <span><span class="sw" style="background:#1c232c"></span>FINALIZE กันไว้ 4 นาทีเสมอ</span>
+        <span>งานที่ไม่มีอะไรให้คำนวณ: WRITE ได้เวลาของ MODEL และ SOLVE ไปด้วย (รวม 55%)</span>
         <span>ตัวเลขเป็นค่าตั้งต้น จะปรับตามผลวัดใน M5</span>
       </div>
 
@@ -544,11 +547,11 @@
       <div class="table-wrap">
         <table>
           <tr><th>crate</th><th>หน้าที่</th><th>สถานะ</th></tr>
-          <tr><td><code>volund</code></td><td>binary ของ server: รับ 1 task ต่อการเชื่อมต่อ, loop ของ agent, tool</td><td><span class="chip done">M1</span> <span class="chip now">driver: M2</span></td></tr>
+          <tr><td><code>volund</code></td><td>binary ของ server: รับ 1 task ต่อการเชื่อมต่อ, loop ของ agent, tool</td><td><span class="chip done">M1</span> <span class="chip done">driver M2</span></td></tr>
           <tr><td><code>volund-llm</code></td><td>client ของ Chat Completions แบบ stream, retry, ปรับ request เมื่อโดนปฏิเสธ</td><td><span class="chip done">M1</span></td></tr>
           <tr><td><code>volund-proto</code></td><td>type ของ protocol v1 และตัวกันไม่ให้ส่ง frame ผิดรูปแบบ</td><td><span class="chip done">M1</span></td></tr>
-          <tr><td><code>volund-world</code></td><td>World Model, ด่านก่อนจบ, ค่าประมาณคะแนน</td><td><span class="chip done">มีแล้ว</span> <span class="chip now">ต่อเข้า loop: M2</span></td></tr>
-          <tr><td><code>volund-fsm</code></td><td>Phase State Machine เป็น pure function</td><td><span class="chip done">มีแล้ว</span> <span class="chip now">ต่อเข้า loop: M2</span></td></tr>
+          <tr><td><code>volund-world</code></td><td>World Model, ด่านก่อนจบ, ค่าประมาณคะแนน</td><td><span class="chip done">มีแล้ว</span> <span class="chip done">คุม loop แล้ว M2</span></td></tr>
+          <tr><td><code>volund-fsm</code></td><td>Phase State Machine เป็น pure function</td><td><span class="chip done">มีแล้ว</span> <span class="chip done">คุม loop แล้ว M2</span></td></tr>
           <tr><td><code>volund-mock</code></td><td>โมเดลปลอมที่ตอบตามสคริปต์ ใช้ในเทสต์และ <code>kit check</code> ก่อนมีโมเดลจริง ไม่อยู่ในงานที่ส่ง</td><td><span class="chip done">M1</span></td></tr>
           <tr><td><code>volund-mcp</code></td><td>คุยกับแอปของโจทย์ (JSON-RPC ผ่านคำขอ <code>http</code>) ถ้ามี tool ไม่เกิน 128 ตัวจะส่งให้โมเดลตรง ๆ ถ้ามากกว่านั้นจะให้ค้นด้วย <code>mcp_find</code> แล้วเรียกด้วย <code>mcp_call</code></td><td><span class="chip done">M2</span></td></tr>
         </table>
@@ -579,7 +582,7 @@
           <h3 style="margin-bottom:8px">Ablation: เพิ่มทีละชั้นแล้ววัด</h3>
           <ol class="ladder">
             <li><span class="id">A0</span><span>sample <code>custom-openai</code> ของผู้จัด (baseline)</span></li>
-            <li><span class="id">A1</span><span>Völund แบบ loop เดียว ต้องได้เท่า A0 <span class="chip done">พร้อม</span></span></li>
+            <li><span class="id">A1</span><span>Völund แบบ loop เดียว (<code>VOLUND_AGENT=loop</code>) ต้องได้เท่า A0 <span class="chip done">พร้อม</span></span></li>
             <li><span class="id">A2</span><span>+ PROBE</span></li>
             <li><span class="id">A3</span><span>+ World และการ render ใหม่จาก World</span></li>
             <li><span class="id">A4</span><span>+ State Machine และด่านก่อนจบ</span></li>
@@ -617,7 +620,7 @@
         <ol class="timeline">
           <li><span class="m">M0</span><div><span class="when">15–17 พ.ย.</span> <span class="chip done">เสร็จส่วนใหญ่</span><br>โครง repo, สิทธิ์ dataset, ตั้งโปรเจกต์ GCP <span class="chip wait">รอ</span>, ทีมอ่านโจทย์ dev 3–4 งาน</div></li>
           <li><span class="m">M1</span><div><span class="when">18–24 พ.ย.</span> <span class="chip done">เสร็จยกเว้นส่วนที่ต้องใช้โมเดลจริง</span><br>server, LLM client, loop เดียว, <code>submission.yaml</code>, <code>kit check</code> ผ่านบน Mac, baseline A0 <span class="chip wait">รอ GCP</span></div></li>
-          <li><span class="m">M2</span><div><span class="when">25 พ.ย.–1 ธ.ค.</span> <span class="chip now">เริ่มแล้ว</span><br>driver + World + State Machine + tool + MCP, รันเต็มชุดครั้งแรกบน VM, ติดป้ายสาเหตุที่พลาด</div></li>
+          <li><span class="m">M2</span><div><span class="when">25 พ.ย.–1 ธ.ค.</span> <span class="chip done">โค้ดเสร็จ</span> <span class="chip wait">รอ VM</span><br>driver + World + State Machine + tool + MCP, รันเต็มชุดครั้งแรกบน VM, ติดป้ายสาเหตุที่พลาด</div></li>
           <li><span class="m">M3</span><div><span class="when">2–8 ธ.ค.</span> <span class="chip plan">แผน</span><br>MODEL/SOLVE, CHECK, VERIFY, ด่านก่อนจบ, เทียบ 2 โมเดลขึ้นไปแล้ว<b>เลือกโมเดล</b></div></li>
           <li><span class="m">M4</span><div><span class="when">9–15 ธ.ค.</span> <span class="chip plan">แผน</span><br><code>view_page</code>, ตัวตรวจการแพ็ก, ขั้น optimize, ablation</div></li>
           <li><span class="m">M5</span><div><span class="when">16–22 ธ.ค.</span> <span class="chip plan">แผน</span><br>กราฟคะแนนกับต้นทุน, ทดสอบ cancel และ retry, ปรับงบต่อ phase</div></li>

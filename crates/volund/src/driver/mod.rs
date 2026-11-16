@@ -41,6 +41,9 @@ const MAX_TRANSITIONS: usize = 60;
 const MIN_PHASE_TIME: Duration = Duration::from_secs(2);
 /// Replies with neither text nor tool calls before a phase is ended.
 const MAX_NUDGES: u32 = 2;
+/// Times the state machine may send a phase straight back to itself (INTAKE without deliverables,
+/// MODEL with failing tests) before the phase counts as spent.
+const MAX_REENTRIES: u32 = 3;
 const KEEP_RECENT_RESULTS: usize = 12;
 const TRIMMED_KEEP_CHARS: usize = 600;
 const FILES_SHOWN: usize = 150;
@@ -82,6 +85,7 @@ pub struct Driver {
     total: Duration,
     wrap_up: Duration,
     spent: HashMap<Phase, Duration>,
+    reentries: HashMap<Phase, u32>,
     fix_rounds: u32,
     snapshot: Option<Snapshot>,
     prompt_tokens: u64,
@@ -110,6 +114,7 @@ impl Driver {
             wrap_up: WRAP_UP.min(total / 4),
             total,
             spent: HashMap::new(),
+            reentries: HashMap::new(),
             fix_rounds: 0,
             snapshot: None,
             prompt_tokens: 0,
@@ -153,6 +158,9 @@ impl Driver {
             );
             for effect in &t.effects {
                 self.apply(*effect).await;
+            }
+            if t.to == phase {
+                *self.reentries.entry(phase).or_default() += 1;
             }
             self.reason = t.reason;
             phase = t.to;
@@ -205,7 +213,8 @@ impl Driver {
 
     /// A phase of the working conversation.
     async fn work(&mut self, phase: Phase) -> Event {
-        if self.model_failed.is_some() {
+        let repeats = self.reentries.get(&phase).copied().unwrap_or(0);
+        if self.model_failed.is_some() || repeats >= MAX_REENTRIES {
             return Event::BudgetSpent;
         }
         let deadline = self.phase_deadline(phase);

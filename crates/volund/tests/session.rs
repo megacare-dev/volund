@@ -632,3 +632,47 @@ async fn phases_without_model_settings_the_task_ends_with_an_error() {
     let run = evaluate(addr, task(SMOKE, Some(600)), Behaviour::default()).await;
     assert_eq!(run.end["type"], "error");
 }
+
+#[tokio::test]
+async fn phases_a_model_that_never_records_moves_on_after_three_tries() {
+    let m = model(
+        json!({"scripts": [{"when": "forgetful", "summary": "Nothing recorded.", "phases": {
+            "INTAKE": [{"text": "I read the task."}],
+            "VERIFY": [{"text": "No issues."}]
+        }}]}),
+    )
+    .await;
+    let addr = harness(Some(&m), AgentKind::Phases).await;
+    let run = evaluate(
+        addr,
+        task("a forgetful task", Some(600)),
+        Behaviour::default(),
+    )
+    .await;
+    assert_eq!(run.end["type"], "done");
+    let intake_calls = m
+        .requests()
+        .iter()
+        .filter(|r| {
+            r["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .rev()
+                .find_map(|msg| {
+                    let text = msg["content"]
+                        .as_str()
+                        .or_else(|| msg["content"][0]["text"].as_str())?;
+                    text.starts_with("Phase: ")
+                        .then(|| text.starts_with("Phase: INTAKE"))
+                })
+                == Some(true)
+        })
+        .count();
+    assert_eq!(intake_calls, 3, "INTAKE re-entered at most three times");
+    let steps = transitions(&run);
+    assert!(
+        steps.contains(&("INTAKE".into(), "WRITE".into())),
+        "{steps:?}"
+    );
+}
