@@ -24,6 +24,9 @@
 //!
 //! A request with `tool_choice: "none"` (the harness asking for its final summary) gets `summary`.
 //!
+//! `{{last_tool_line}}` in a call's arguments becomes the first line of the newest tool result, so a
+//! script can pass on what a tool returned (the kit's MCP task hands back a word chosen at run time).
+//!
 //! `fail_calls` makes the n-th HTTP call (counting from 1) answer with that status, or `"cut"` it:
 //! stream part of a reply and close without a finish reason.
 
@@ -105,7 +108,7 @@ async fn handle(
         let body = json!({"error": {"message": format!("mock failure {status}")}}).to_string();
         return respond(&mut stream, status as u16, "application/json", &body).await;
     }
-    let turn = pick_turn(script, &request);
+    let turn = fill(pick_turn(script, &request), &request);
     if request.get("stream").and_then(Value::as_bool) != Some(true) {
         let body = json!({
             "id": "mock", "object": "chat.completion", "model": request["model"],
@@ -159,6 +162,30 @@ fn pick_turn(script: &Value, request: &Value) -> Value {
         None if repeat_last && !turns.is_empty() => turns[turns.len() - 1].clone(),
         None => json!({"text": "done"}),
     }
+}
+
+/// Replaces `{{last_tool_line}}` in the turn's call arguments.
+fn fill(mut turn: Value, request: &Value) -> Value {
+    let last_tool = request["messages"]
+        .as_array()
+        .and_then(|m| m.iter().rev().find(|m| m["role"] == "tool"))
+        .map(|m| text_of(&m["content"]))
+        .unwrap_or_default();
+    let line = last_tool.lines().next().unwrap_or("").trim().to_owned();
+    fn walk(v: &mut Value, line: &str) {
+        match v {
+            Value::String(s) if s.contains("{{last_tool_line}}") => {
+                *s = s.replace("{{last_tool_line}}", line)
+            }
+            Value::Array(items) => items.iter_mut().for_each(|i| walk(i, line)),
+            Value::Object(map) => map.values_mut().for_each(|i| walk(i, line)),
+            _ => {}
+        }
+    }
+    if let Some(calls) = turn.get_mut("calls") {
+        walk(calls, &line);
+    }
+    turn
 }
 
 fn text_of(content: &Value) -> String {

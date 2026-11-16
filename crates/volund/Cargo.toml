@@ -11,6 +11,7 @@ volund-world.workspace = true
 volund-fsm.workspace = true
 volund-proto.workspace = true
 volund-llm.workspace = true
+volund-mcp.workspace = true
 serde_json.workspace = true
 base64.workspace = true
 tokio.workspace = true
@@ -20,6 +21,7 @@ futures-util.workspace = true
 [dev-dependencies]
 volund-mock.workspace = true
 volund-llm.workspace = true
+volund-mcp.workspace = true
 
 [lints]
 workspace = true

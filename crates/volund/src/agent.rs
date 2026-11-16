@@ -14,8 +14,10 @@ use serde_json::{Value, json};
 use tokio::time::Instant;
 use volund_llm::{Call, Client, Error, Reply, ToolChoice, visible};
 
+use volund_mcp::Catalog;
+
 use crate::link::Link;
-use crate::tools;
+use crate::{mcp, tools};
 
 const FINISH_MARGIN: Duration = Duration::from_secs(180);
 /// Tool results kept whole however long the conversation grows.
@@ -49,6 +51,7 @@ pub struct Agent {
     link: Arc<Link>,
     llm: Arc<Client>,
     tools: Vec<Value>,
+    catalog: Catalog,
     messages: Vec<Value>,
     prompt_tokens: u64,
     compact_at: u64,
@@ -61,6 +64,7 @@ impl Agent {
             link,
             llm,
             tools: tools::definitions(),
+            catalog: Catalog::new(Vec::new(), tools::NAMES),
             messages: Vec::new(),
             prompt_tokens: 0,
             compact_at,
@@ -76,9 +80,19 @@ impl Agent {
             || "unlimited".to_owned(),
             |l| (l.as_secs() / 60).to_string(),
         );
-        let system = SYSTEM
+        let (catalog, missing) = mcp::connect_all(&self.link, tools::NAMES).await;
+        self.catalog = catalog;
+        self.tools.extend(self.catalog.functions());
+        let mut system = SYSTEM
             .replace("{workdir}", &self.link.task.workdir)
             .replace("{minutes}", &minutes);
+        system.push_str(&self.catalog.prompt());
+        if !missing.is_empty() {
+            system.push_str(&format!(
+                "\n\nThe task's application server(s) {} did not answer when the run started.",
+                missing.join(", ")
+            ));
+        }
         self.messages = vec![
             json!({"role": "system", "content": system}),
             json!({"role": "user", "content": self.link.task.instruction}),
@@ -166,7 +180,12 @@ impl Agent {
                             .take(400)
                             .collect();
                         self.link.log(format!("{} {shown}", call.name));
-                        tools::run(&self.link, &call.name, &args, self.exec_cap()).await
+                        match mcp::run(&self.link, &self.catalog, &call.name, &args).await {
+                            Some(result) => tools::clip(&result, tools::RESULT_CHARS),
+                            None => {
+                                tools::run(&self.link, &call.name, &args, self.exec_cap()).await
+                            }
+                        }
                     }
                     // arguments cut off at the output limit are the usual cause
                     Err(e) if cut_off => {

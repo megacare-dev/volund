@@ -75,6 +75,7 @@ struct Run {
     commands: Vec<String>,
     usage: usize,
     logs: Vec<String>,
+    mcp_methods: Vec<String>,
     cancel_sent: Option<Instant>,
     ended: Option<Instant>,
 }
@@ -172,6 +173,24 @@ async fn evaluate(addr: SocketAddr, first: Value, how: Behaviour) -> Run {
                 }
                 None => json!({"type": "result", "id": id, "ok": false, "error": "no such file"}),
             },
+            "http" => {
+                assert_eq!(frame["url"], MCP_URL);
+                let body: Value = serde_json::from_slice(
+                    &B64.decode(frame["body_b64"].as_str().unwrap()).unwrap(),
+                )
+                .unwrap();
+                run.mcp_methods
+                    .push(body["method"].as_str().unwrap().to_owned());
+                let answer = mcp_stub(&body);
+                let kind = if answer.is_empty() {
+                    "application/json"
+                } else {
+                    "text/event-stream"
+                };
+                json!({"type": "result", "id": id, "ok": true, "status": if answer.is_empty() { 202 } else { 200 },
+                       "headers": {"Content-Type": kind, "Mcp-Session-Id": "plebench-check"},
+                       "body_b64": B64.encode(answer), "truncated": false})
+            }
             "log" => {
                 run.logs.push(frame["text"].as_str().unwrap().to_owned());
                 continue;
@@ -193,6 +212,79 @@ async fn evaluate(addr: SocketAddr, first: Value, how: Behaviour) -> Run {
 
 fn kit_script() -> Value {
     serde_json::from_str(KIT_SCRIPT).unwrap()
+}
+
+const MCP_URL: &str = "http://127.0.0.1:8000/mcp/";
+/// The kit's MCP task (kit/check.py), word for word.
+const MCP_TASK: &str = "The task's MCP server `apps` has a tool named `secret_word`. Call it, then create a \
+file named `mcp.txt` in the current working directory (`/app`) whose entire content is the single word the \
+tool returns. Do not create any other files. When the file exists, reply with the word done and stop.";
+const SECRET: &str = "MCP-7E57AB12";
+
+/// Answers like the kit's MCP stub: server-sent events, `202` (empty) for notifications.
+fn mcp_stub(message: &Value) -> String {
+    let Some(id) = message.get("id") else {
+        return String::new();
+    };
+    let result = match message["method"].as_str().unwrap() {
+        "initialize" => json!({"protocolVersion": "2025-06-18", "capabilities": {"tools": {}},
+                               "serverInfo": {"name": "apps", "version": "1"}}),
+        "tools/list" => {
+            json!({"tools": [{"name": "secret_word", "description": "Returns the secret word.",
+                                          "inputSchema": {"type": "object", "properties": {}}}]})
+        }
+        "tools/call" => json!({"content": [{"type": "text", "text": SECRET}], "isError": false}),
+        other => panic!("unexpected MCP method {other}"),
+    };
+    let reply = json!({"jsonrpc": "2.0", "id": id, "result": result});
+    format!("event: message\ndata: {reply}\n\n")
+}
+
+#[tokio::test]
+async fn the_kit_mcp_task_gets_its_word_through_http() {
+    let m = model(kit_script()).await;
+    let addr = harness(Some(&m)).await;
+    let mut first = task(MCP_TASK, Some(420));
+    first["mcp_servers"] =
+        json!([{"name": "apps", "url": MCP_URL, "transport": "streamable-http"}]);
+    let run = evaluate(addr, first, Behaviour::default()).await;
+    assert_eq!(run.end, json!({"type": "done", "final_message": "done"}));
+    assert_eq!(
+        run.files
+            .get("/app/mcp.txt")
+            .map(|b| String::from_utf8_lossy(b).trim().to_owned()),
+        Some(SECRET.to_owned())
+    );
+    assert_eq!(
+        run.mcp_methods,
+        [
+            "initialize",
+            "notifications/initialized",
+            "tools/list",
+            "tools/call"
+        ]
+    );
+    let offered: Vec<String> = m.requests()[0]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["function"]["name"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(
+        offered,
+        [
+            "bash",
+            "read_file",
+            "write_file",
+            "edit_file",
+            "apps__secret_word"
+        ]
+    );
+    assert!(
+        run.logs.iter().any(|l| l == "mcp apps: 1 tools"),
+        "{:?}",
+        run.logs
+    );
 }
 
 #[tokio::test]

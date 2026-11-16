@@ -24,6 +24,7 @@ volund-fsm = { path = "crates/volund-fsm" }
 volund-proto = { path = "crates/volund-proto" }
 volund-llm = { path = "crates/volund-llm" }
 volund-mock = { path = "crates/volund-mock" }
+volund-mcp = { path = "crates/volund-mcp" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

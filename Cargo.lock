@@ -1203,6 +1203,7 @@ dependencies = [
  "tokio-tungstenite",
  "volund-fsm",
  "volund-llm",
+ "volund-mcp",
  "volund-mock",
  "volund-proto",
  "volund-world",
@@ -1225,6 +1226,14 @@ dependencies = [
  "serde_json",
  "tokio",
  "volund-mock",
+]
+
+[[package]]
+name = "volund-mcp"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

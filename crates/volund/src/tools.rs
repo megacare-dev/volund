@@ -25,6 +25,9 @@ fn tool(name: &str, description: &str, required: &[&str], properties: Value) -> 
     })
 }
 
+/// The names of the harness's own tools, in [`definitions`] order.
+pub const NAMES: &[&str] = &["bash", "read_file", "write_file", "edit_file"];
+
 /// Function definitions offered to the model.
 pub fn definitions() -> Vec<Value> {
     vec![

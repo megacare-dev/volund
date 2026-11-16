@@ -13,6 +13,14 @@
       ]
     },
     {
+      "when": "secret_word",
+      "turns": [
+        {"calls": [{"name": "apps__secret_word", "arguments": {}}]},
+        {"calls": [{"name": "write_file", "arguments": {"path": "mcp.txt", "content": "{{last_tool_line}}\n"}}]},
+        {"text": "done"}
+      ]
+    },
+    {
       "when": "design memo",
       "repeat_last": true,
       "turns": [
