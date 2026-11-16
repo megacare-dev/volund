@@ -164,7 +164,7 @@
   <div class="wrap hero-inner">
     <div class="eyebrow">Physical-Engineering's Last Exam · Agent Harness</div>
     <h1><span>Völund</span>: แบบของ harness</h1>
-    <p class="lede">เอกสารนี้อธิบายให้ทีมเห็นภาพเดียวกันว่าเราจะสร้างอะไร ทำไมออกแบบแบบนี้ และตอนนี้ไปถึงไหนแล้ว รายละเอียดทุกข้ออยู่ใน <a href="../DESIGN.md">DESIGN.md</a></p>
+    <p class="lede">เอกสารนี้อธิบายแบบของ harness ที่เสนอให้ทีม ได้แก่ จะสร้างอะไร ทำไมออกแบบแบบนี้ และต้นแบบตอนนี้ไปถึงไหนแล้ว ทุกข้อยังปรับได้ตามที่ทีมตกลงกัน รายละเอียดทุกข้ออยู่ใน <a href="../DESIGN.md">DESIGN.md</a></p>
     <div class="facts">
       <span class="fact">ปิดรับงาน <b>6 ม.ค. 2027 06:59</b> เวลาไทย</span>
       <span class="fact">ทีมตั้งเป้าส่ง <b>4 ม.ค.</b></span>
@@ -666,8 +666,8 @@
       <p class="sub">สำหรับคนในทีมที่ไม่ได้อยู่สายซอฟต์แวร์</p>
       <div class="card">
         <dl class="gloss">
-          <dt>Harness</dt><dd>โปรแกรมที่พาโมเดลทำงาน: ส่ง prompt, รับคำสั่งที่โมเดลอยากรัน, ไปรันให้, ส่งผลกลับ และตัดสินว่าเมื่อไรพอ สิ่งที่เราส่งแข่งคือตัวนี้</dd>
-          <dt>Serve container</dt><dd>เครื่องจำลองที่ harness ของเรารันอยู่ ออก network ได้แค่ไปหาโมเดล</dd>
+          <dt>Harness</dt><dd>โปรแกรมที่พาโมเดลทำงาน: ส่ง prompt, รับคำสั่งที่โมเดลอยากรัน, ไปรันให้, ส่งผลกลับ และตัดสินว่าเมื่อไรพอ สิ่งที่แต่ละทีมส่งแข่งคือตัวนี้</dd>
+          <dt>Serve container</dt><dd>เครื่องจำลองที่ harness รันอยู่ ออก network ได้แค่ไปหาโมเดล</dd>
           <dt>Task container</dt><dd>เครื่องจำลองที่มีไฟล์โจทย์ ทุกคำสั่งรันที่นี่ และ grader ตรวจไฟล์ที่นี่</dd>
           <dt>Deliverable</dt><dd>ไฟล์งานส่งที่โจทย์สั่ง เช่น รายงาน, spreadsheet, zip, ไฟล์ IFC</dd>
           <dt>Hard constraint</dt><dd>ข้อกำหนดที่พลาดไม่ได้ พลาดข้อเดียวคะแนนตันที่ 0.4</dd>
