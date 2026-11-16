@@ -187,25 +187,15 @@ evaluator ─ws─► volund (serve container: 2 CPU / 4 GB)
 
 ## 7. Build และแพ็กเกจ
 
-ร่าง `submission.yaml` (ทำจริงใน M1 แล้วต้องผ่าน `kit validate` และ `kit check`)
-
-```yaml
-name: volund
-model_api: google-cloud/<ตัดสินใน M3>
-install: >-
-  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs
-  | RUSTUP_HOME=/tmp/rustup CARGO_HOME=/tmp/cargo sh -s -- -y --profile minimal --default-toolchain 1.98.1 --no-modify-path
-  && cd {src}
-  && RUSTUP_HOME=/tmp/rustup CARGO_HOME=/tmp/cargo CARGO_TARGET_DIR=/tmp/target
-     /tmp/cargo/bin/cargo build --release --locked -p volund
-  && install -D -m 0755 /tmp/target/release/volund /opt/harness/bin/volund
-serve: /opt/harness/bin/volund
-```
+ไฟล์จริงคือ [`submission.yaml`](submission.yaml) (ผ่าน `kit validate` แล้ว)
 
 - ติดตั้ง toolchain และ target ไว้ใน `/tmp` เพื่อไม่ให้ไปปนใน bundle ใต้ `/opt/harness` แล้ว copy มาเฉพาะ binary
-- หน้า Kaggle เขียนว่า repo ต้องมี `serve.py` และ `harness.py` แม้ kit จะไม่ได้เช็ก ให้ใส่ไฟล์ Python บางๆ ที่ `exec` ตัว binary ไว้กันพลาด (M1)
-- บน Mac ตัว kit build เป็น `linux/amd64` แบบ emulation ซึ่งช้า ต้องจับเวลา build ครั้งแรก ต้องเสร็จใน 30 นาทีบนเครื่องผู้จัด
-- license ของ dependency: อนุญาตเฉพาะ MIT, Apache-2.0, BSD, ISC, Zlib, Unicode ตรวจด้วย `cargo-deny` (ติดตั้งใน M1)
+- ตั้ง `RUSTUP_TOOLCHAIN=1.98.1` เพื่อข้าม `rust-toolchain.toml` ไม่ให้โหลด rustfmt กับ clippy ที่ build ไม่ได้ใช้
+- ตั้ง `CARGO_BUILD_JOBS=2` เพราะ เครื่องที่ใช้ทดสอบรันงานอื่นอยู่ด้วย ถ้าไม่จำกัด build จะกิน CPU ทุก core
+- TLS ใช้ rustls คู่กับ ring ซึ่ง build ด้วย C compiler อย่างเดียวได้ (build image ไม่มี cmake) และอ่าน root certificate จากระบบของ serve image
+- `serve.py` กับ `harness.py` (หน้า Kaggle ระบุว่าต้องมี) แค่ `exec` ตัว binary
+- บน Mac ตัว kit build เป็น `linux/amd64` แบบ emulation ซึ่งช้า ต้องจับเวลา build ครั้งแรก และต้องเสร็จใน 30 นาทีบนเครื่องผู้จัด
+- license ของ dependency: อนุญาตเฉพาะ MIT, Apache-2.0, BSD, ISC, Zlib, Unicode ตรวจ 16 พ.ย. ด้วย `cargo metadata` แล้วผ่านครบทั้ง 114 crate ใน binary ส่วน `cargo-deny` จะเพิ่มทีหลังเพื่อตรวจซ้ำอัตโนมัติ
 
 ## 8. ต้นทุน
 
@@ -270,12 +260,22 @@ serve: /opt/harness/bin/volund
 | M6 | 23–29 ธ.ค. | หยุดเพิ่มฟีเจอร์, รันเต็มชุด 2 รอบด้วยโมเดลที่จะส่ง, `artifacts/` |
 | M7 | 30 ธ.ค.–4 ม.ค. | writeup ≤ 2,000 คำ + 3 รูป + ภาพปก, `kit check` ได้ `ready to submit`, ส่ง |
 
+**สถานะ 16 พ.ย.:** ส่วนของ M1 ที่ไม่ต้องใช้โมเดลจริงเสร็จแล้ว
+
+- `kit check --cancel-test` บน Mac ผ่านทุกขั้น โดยใช้ mock model แทน proxy
+  - build ใช้เวลา 173 วินาที (amd64 แบบ emulation, 2 job)
+  - smoke และ cancel ผ่าน
+  - `mcp` ขึ้น warning จนกว่า M2 จะทำ MCP
+  - `artifacts` ขึ้น warning เพราะยังไม่ได้รัน eval
+
+ส่วนที่เหลือของ M1 คือ baseline A0 และการรันกับโมเดลจริง ซึ่งรอโปรเจกต์ GCP ที่เปิด Vertex AI ไว้
+
 ## 11. สิ่งที่ยังไม่รู้ (ต้องวัดใน M0–M1)
 
 1. ใน task container มี python, library อะไรบ้าง, pdftoppm, libreoffice และ `/tmp` เขียนได้หรือไม่ (วัดด้วย PROBE ใน dev task)
 2. gateway รับรูปภาพสำหรับโมเดลที่จะใช้หรือไม่ (ถ้าไม่รับ หลักข้อ 3 ต้องเปลี่ยนวิธี)
 3. ค่าใช้จ่ายของ 1 งานต่อโมเดล
-4. เวลา build Rust ใน kit (amd64)
+4. ~~เวลา build Rust ใน kit (amd64)~~ วัดแล้ว 173 วินาทีบน Mac แบบ emulation 2 job ส่วนบนเครื่องผู้จัดที่เป็น amd64 จริงน่าจะเร็วกว่านี้ (16 พ.ย.)
 5. โครงสร้าง `submission.zip` ที่แต่ละงานต้องการ (อ่านจากโจทย์ ห้ามอ่านจาก grader)
 
 ## 12. บทบาทในทีม (ให้ทีมตกลงชื่อผู้รับผิดชอบ)
