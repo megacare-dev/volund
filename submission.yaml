@@ -3,7 +3,8 @@
 # The harness is the Rust binary built from crates/volund. The build image has no Rust, so install puts
 # a pinned toolchain and the build's target directory under /tmp (outside the packed /opt/harness) and
 # copies in only the binary. RUSTUP_TOOLCHAIN overrides rust-toolchain.toml so the build skips the
-# rustfmt and clippy components it does not need.
+# rustfmt and clippy components it does not need. Two compile jobs keep the build from taking every core
+# of a shared Docker host; it still ends well inside the 30-minute build limit.
 name: volund
 # placeholder until the model is chosen (DESIGN.md §10, M3)
 model_api: google-cloud/claude-opus-5-5
@@ -12,6 +13,6 @@ install: >-
   | RUSTUP_HOME=/tmp/rustup CARGO_HOME=/tmp/cargo sh -s -- -y --profile minimal --default-toolchain 1.98.1 --no-modify-path
   && cd {src}
   && RUSTUP_HOME=/tmp/rustup CARGO_HOME=/tmp/cargo RUSTUP_TOOLCHAIN=1.98.1 CARGO_TARGET_DIR=/tmp/target
-  /tmp/cargo/bin/cargo build --release --locked -p volund
+  CARGO_BUILD_JOBS=2 /tmp/cargo/bin/cargo build --release --locked -p volund
   && install -D -m 0755 /tmp/target/release/volund /opt/harness/bin/volund
 serve: python3 {src}/serve.py
